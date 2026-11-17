@@ -1,0 +1,12 @@
+build/
+.qtcreator/
+*.user
+*.user.*
+CMakeLists.txt.user*
+*.zip
+*.tar.gz
+*.o
+*.a
+*.so
+.vscode/
+.idea/
