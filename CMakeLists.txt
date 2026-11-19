@@ -32,7 +32,7 @@ add_library(stego_core STATIC
     core/stego/AdaptiveLsb.cpp
     core/stego/AudioIO.cpp
     core/stego/AudioLsb.cpp
-    # core/stego/BlockDct.cpp
+    core/stego/BlockDct.cpp
     core/ecc/ReedSolomon.cpp
     core/analysis/Metrics.cpp
 )
@@ -79,6 +79,10 @@ add_test(NAME audio_lsb_roundtrip COMMAND audio_lsb_roundtrip)
 add_executable(reed_solomon_test tests/reed_solomon_test.cpp)
 target_link_libraries(reed_solomon_test PRIVATE stego_core)
 add_test(NAME reed_solomon_test COMMAND reed_solomon_test)
+
+add_executable(block_dct_roundtrip tests/block_dct_roundtrip.cpp)
+target_link_libraries(block_dct_roundtrip PRIVATE stego_core)
+add_test(NAME block_dct_roundtrip COMMAND block_dct_roundtrip)
 
 add_executable(metrics_test tests/metrics_test.cpp)
 target_link_libraries(metrics_test PRIVATE stego_core)

@@ -36,13 +36,13 @@ std::vector<uint32_t> takeFromPermutation(size_t N, const Seed32& seed, size_t w
 }  // namespace
 
 std::vector<uint32_t> select(size_t N, int k, Region region, const Seed32& bodySeed,
-                             size_t nBytes) {
+                             size_t nBytes, size_t rawHeaderBytes) {
     if (k < 1 || k > 8) throw std::invalid_argument("bitsPerSlot must be 1..8");
     if (N > std::numeric_limits<uint32_t>::max()) throw std::length_error("too many slots");
-    const size_t headerSlots = ceilDiv(kHeaderBytes * 8, static_cast<size_t>(k));
+    const size_t headerSlots = ceilDiv(rawHeaderBytes * 8, static_cast<size_t>(k));
 
     if (region == Region::Header) {
-        if (nBytes != kHeaderBytes) throw std::invalid_argument("header must be kHeaderBytes");
+        if (nBytes != rawHeaderBytes) throw std::invalid_argument("header size mismatch");
         return takeFromPermutation(N, kHeaderSeed, headerSlots, nullptr);
     }
     const auto hdr = takeFromPermutation(N, kHeaderSeed, headerSlots, nullptr);
