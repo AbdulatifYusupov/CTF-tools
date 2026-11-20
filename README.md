@@ -6,12 +6,14 @@ C++20 / Qt 6 / OpenCV / libsndfile / OpenSSL 3.5. Hybrid post-quantum envelope
 ## First build (Debian / Kali / Ubuntu)
 
 ```bash
-sudo apt install build-essential cmake pkg-config perl curl \
-     libopencv-dev libsndfile1-dev qt6-base-dev libgl1-mesa-dev
-
-bash scripts/build_openssl.sh       # OpenSSL 3.5.x into ~/.local (needed for ML-KEM)
-export OPENSSL_ROOT_DIR=$HOME/.local/openssl-3.5.10
-bash scripts/build.sh               # configure + build + run all tests
+sudo apt update && sudo apt install build-essential cmake pkg-config \
+     libopencv-dev libsndfile1-dev qt6-base-dev libgl1-mesa-dev libssl-dev
+```
+### Build and test 
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+ctest --test-dir build --output-on-failure
 ```
 
 Expected: 9 tests, all `Passed`:
