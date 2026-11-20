@@ -1,90 +1,55 @@
-# Stego Kripto Tool
+# Stego Tool
 
-Small educational tool that combines **steganography** and **post-quantum cryptography**.
+C++20 / Qt 6 / OpenCV / libsndfile / OpenSSL 3.5. Hybrid post-quantum envelope
+(ML-KEM-768 + HKDF + ChaCha20-Poly1305) hidden with adaptive LSB (images), LSB (audio) or block DCT (images).
 
-Hide a message inside an image or audio file so that only the owner of the corresponding private key can extract it.
-
----
-
-## What it does
-
-1. **Encrypts** the payload with a hybrid scheme:
-   - ML-KEM-768 (Kyber) for key encapsulation
-   - ChaCha20-Poly1305 for authenticated encryption of the body
-2. **Embeds** the result into a carrier using adaptive LSB (images) or LSB (audio)
-3. **Extracts** and decrypts only with the matching private key
-
-No magic bytes, no plaintext length in the clear. Header positions use a public seed; body positions are derived from the shared secret.
-
----
-
-## Features
-
-| Component | Details |
-|-----------|---------|
-| **Crypto** | ML-KEM-768 + ChaCha20-Poly1305 + HKDF-SHA256 |
-| **Image stego** | Adaptive LSB (Sobel-based busy pixels, 1–2 bits/channel) |
-| **Audio stego** | LSB on PCM samples (libsndfile) |
-| **Error correction** | Reed-Solomon |
-| **Analysis** | PSNR, SSIM, chi-square attack, LSB plane, amplified difference |
-| **UI** | Qt6 worker (GUI still under construction) |
-| **Language** | C++20 |
-
----
-
-## Build
-
-### Requirements
-
-- CMake ≥ 3.21
-- C++20 compiler
-- **OpenSSL ≥ 3.5** (ML-KEM support)
-- OpenCV (core, imgproc, imgcodecs)
-- Qt6 ≥ 6.5 (Widgets + Concurrent)
-- libsndfile
-
-> Ubuntu 24.04 ships OpenSSL 3.0. You will need a custom build of OpenSSL 3.5+ and point CMake to it:
-> ```bash
-> cmake -DOPENSSL_ROOT_DIR=/opt/openssl-3.5 ..
-> ```
-
-### Commands
+## First build (Debian / Kali / Ubuntu)
 
 ```bash
-git clone https://github.com/AbdulatifYusupov/stego_kripto_tool.git
-cd stego_kripto_tool
-mkdir build && cd build
-cmake ..
-cmake --build .
-ctest --output-on-failure   # optional
+sudo apt install build-essential cmake pkg-config perl curl \
+     libopencv-dev libsndfile1-dev qt6-base-dev libgl1-mesa-dev
+
+bash scripts/build_openssl.sh       # OpenSSL 3.5.x into ~/.local (needed for ML-KEM)
+export OPENSSL_ROOT_DIR=$HOME/.local/openssl-3.5.10
+bash scripts/build.sh               # configure + build + run all tests
 ```
 
----
+Expected: 9 tests, all `Passed`:
+`crypto_roundtrip`, `adaptive_lsb_roundtrip`, `audio_lsb_roundtrip`, `block_dct_roundtrip`,
+`reed_solomon_test`, `metrics_test`, `stego_worker_test`, `cli_args_test`, `cli_e2e_test`.
 
-## Project structure
+If something fails, paste the FIRST compiler error (or the failing test's output). Later errors are
+usually fallout from the first one.
+
+## Command line
+
+```bash
+build/stego_cli keygen --out mykey                       # mykey.pub + mykey.key (DER, keep .key secret)
+build/stego_cli capacity --algo block-dct --in photo.jpg # how much fits
+build/stego_cli embed   --algo block-dct --in photo.jpg --out secret.png \
+                        --pub mykey.pub --msg "hello" --progress
+build/stego_cli extract --algo block-dct --in secret.png --key mykey.key
+build/stego_cli analyze --cover photo.jpg --stego secret.png --lsb-out lsb.png --diff-out diff.png
+build/stego_cli help
+```
+
+`embed` prints a profile line (`pairs=2 parity=32`, ...). Pass the same algorithm options to `extract`.
+Exit codes: 0 ok, 2 bad arguments, 3 no message / wrong key / damaged file, 4 does not fit, 5 I/O error.
+
+## Layout
 
 ```
-core/
-  crypto/     # ML-KEM envelope + AEAD
-  stego/      # Adaptive LSB, Audio LSB, Pipeline, PRNG, SlotCodec
-  ecc/        # Reed-Solomon
-  analysis/   # PSNR, SSIM, chi-square, etc.
-ui/           # StegoWorker + (WIP) GUI
-tests/        # Round-trip and unit tests
+core/crypto    ML-KEM + HKDF + ChaCha20-Poly1305 envelope
+core/ecc       Reed-Solomon over GF(256)
+core/stego     IStegoAlgorithm, AdaptiveLsb, AudioLsb, BlockDct, SlotCodec, Pipeline
+core/analysis  PSNR, SSIM, chi-square, LSB plane
+cli            stego_cli (keygen, capacity, embed, extract, analyze)
+ui             StegoWorker (async), GUI stub
+tests          one test per module
 ```
 
-Core library has **no Qt dependency**, so it is easy to test and reuse.
+## Rules that matter
 
----
-
-## Status
-
-Work in progress. Core crypto + stego + metrics + tests are in place. Full GUI is still being built.
-
-Educational / research project — not production-ready and not audited.
-
----
-
-## License
-
-Currently no license file. All rights reserved for now.
+- Images: always save as **PNG**. Audio: **WAV/FLAC**. Any lossy re-encode destroys the payload.
+- `bitsPerChannel`/`bitsPerSample`, `threshold`, `pairsPerBlock`, `paritySymbols` must be identical at
+  embed and extract (they are effectively part of the key). `BlockDct::strength` is encoder-only.

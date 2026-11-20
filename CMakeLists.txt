@@ -62,6 +62,13 @@ add_executable(stego_gui
 )
 target_link_libraries(stego_gui PRIVATE stego_worker Qt6::Widgets)
 
+# ---- CLI --------------------------------------------------------------------
+add_library(stego_cli_args STATIC cli/Args.cpp)
+target_include_directories(stego_cli_args PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cli)
+
+add_executable(stego_cli cli/main.cpp)
+target_link_libraries(stego_cli PRIVATE stego_core stego_cli_args)
+
 # ---- Tests ------------------------------------------------------------------
 enable_testing()
 add_executable(crypto_roundtrip tests/crypto_roundtrip.cpp)
@@ -91,3 +98,11 @@ add_test(NAME metrics_test COMMAND metrics_test)
 add_executable(adaptive_lsb_roundtrip tests/adaptive_lsb_roundtrip.cpp)
 target_link_libraries(adaptive_lsb_roundtrip PRIVATE stego_core)
 add_test(NAME adaptive_lsb_roundtrip COMMAND adaptive_lsb_roundtrip)
+
+add_executable(cli_args_test tests/cli_args_test.cpp)
+target_link_libraries(cli_args_test PRIVATE stego_cli_args)
+add_test(NAME cli_args_test COMMAND cli_args_test)
+
+add_executable(cli_e2e_test tests/cli_e2e_test.cpp)
+target_link_libraries(cli_e2e_test PRIVATE stego_core)
+add_test(NAME cli_e2e_test COMMAND cli_e2e_test $<TARGET_FILE:stego_cli>)
