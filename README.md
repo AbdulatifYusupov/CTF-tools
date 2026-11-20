@@ -9,7 +9,9 @@ C++20 / Qt 6 / OpenCV / libsndfile / OpenSSL 3.5. Hybrid post-quantum envelope
 sudo apt update && sudo apt install build-essential cmake pkg-config \
      libopencv-dev libsndfile1-dev qt6-base-dev libgl1-mesa-dev libssl-dev
 ```
-### Build and test 
+
+### Build & Test
+
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
