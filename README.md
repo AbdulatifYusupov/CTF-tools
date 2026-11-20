@@ -20,9 +20,6 @@ Expected: 9 tests, all `Passed`:
 `crypto_roundtrip`, `adaptive_lsb_roundtrip`, `audio_lsb_roundtrip`, `block_dct_roundtrip`,
 `reed_solomon_test`, `metrics_test`, `stego_worker_test`, `cli_args_test`, `cli_e2e_test`.
 
-If something fails, paste the FIRST compiler error (or the failing test's output). Later errors are
-usually fallout from the first one.
-
 ## Command line
 
 ```bash
