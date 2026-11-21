@@ -224,7 +224,7 @@ BlockDct::BlockDct(Options opt) : opt_(opt), rs_(opt.paritySymbols) {
     if (opt_.paritySymbols < 2 || opt_.paritySymbols > 100) throw std::invalid_argument("paritySymbols must be 2..100");
 }
 
-size_t BlockDct::rawHeaderBytes() const { return rs_.encodedSize(kHeaderBytes); }
+size_t BlockDct::rawHeaderBytes(size_t headerBytes) const { return rs_.encodedSize(headerBytes); }
 
 size_t BlockDct::rawBodyBytes(size_t bodyBytes) const {
     const size_t first = 4 + static_cast<size_t>(rs_.parity());  // RS block of the length field
@@ -232,7 +232,6 @@ size_t BlockDct::rawBodyBytes(size_t bodyBytes) const {
 }
 
 std::vector<uint8_t> BlockDct::packHeader(std::span<const uint8_t> data) const {
-    if (data.size() != kHeaderBytes) throw std::invalid_argument("header must be kHeaderBytes");
     return rs_.encode(data);
 }
 
@@ -246,11 +245,11 @@ std::vector<uint8_t> BlockDct::packBody(std::span<const uint8_t> data) const {
     return raw;
 }
 
-size_t BlockDct::capacityBits(const Carrier& carrier) const {
+size_t BlockDct::capacityBits(const Carrier& carrier, size_t headerBytes) const {
     const auto* img = std::get_if<cv::Mat>(&carrier);
     validate(img);
     const size_t slotsTotal = geometry(*img, opt_.pairsPerBlock).slotCount;
-    const size_t hdrBits    = rawHeaderBytes() * 8;
+    const size_t hdrBits    = rawHeaderBytes(headerBytes) * 8;
     if (slotsTotal <= hdrBits) return 0;
 
     const size_t availBytes = (slotsTotal - hdrBits) / 8;
@@ -261,19 +260,21 @@ size_t BlockDct::capacityBits(const Carrier& carrier) const {
     // Largest r with encodedSize(r) <= avail. encodedSize(r) >= r*255/maxData, so this bounds r.
     size_t r = avail * static_cast<size_t>(rs_.maxBlockData()) / 255;
     while (r > 0 && rs_.encodedSize(r) > avail) --r;
-    return (kHeaderBytes + 4 + r) * 8;
+    return (headerBytes + 4 + r) * 8;
 }
 
 void BlockDct::embed(Carrier& carrier, Region region, std::span<const uint8_t> data, const Seed32& seed,
-                     const Progress& progress) const {
+                     size_t headerBytes, const Progress& progress) const {
     auto* img = std::get_if<cv::Mat>(&carrier);
     validate(img);
     if (data.empty()) throw std::invalid_argument("nothing to embed");
+    if (region == Region::Header && data.size() != headerBytes)
+        throw std::invalid_argument("header size mismatch");
 
     const int pairs = opt_.pairsPerBlock;
     const auto g    = geometry(*img, pairs);
     const auto raw  = region == Region::Header ? packHeader(data) : packBody(data);
-    const auto sel  = slots::select(g.slotCount, 1, region, seed, raw.size(), rawHeaderBytes());
+    const auto sel  = slots::select(g.slotCount, 1, region, seed, raw.size(), rawHeaderBytes(headerBytes));
     const auto as   = assignments(sel, raw, pairs);
 
     size_t groupIdx = 0;
@@ -293,7 +294,7 @@ void BlockDct::embed(Carrier& carrier, Region region, std::span<const uint8_t> d
 }
 
 std::vector<uint8_t> BlockDct::extract(const Carrier& carrier, Region region, size_t nBytes, const Seed32& seed,
-                                       const Progress& progress) const {
+                                       size_t headerBytes, const Progress& progress) const {
     const auto* img = std::get_if<cv::Mat>(&carrier);
     validate(img);
     if (nBytes == 0) return {};
@@ -301,10 +302,10 @@ std::vector<uint8_t> BlockDct::extract(const Carrier& carrier, Region region, si
     const int pairs = opt_.pairsPerBlock;
     const auto g    = geometry(*img, pairs);
     const size_t rawBytes =
-        region == Region::Header ? rawHeaderBytes() : rawBodyBytes(nBytes);
-    if (region == Region::Header && nBytes != kHeaderBytes) throw std::invalid_argument("header must be kHeaderBytes");
+        region == Region::Header ? rawHeaderBytes(headerBytes) : rawBodyBytes(nBytes);
+    if (region == Region::Header && nBytes != headerBytes) throw std::invalid_argument("header size mismatch");
 
-    const auto sel = slots::select(g.slotCount, 1, region, seed, rawBytes, rawHeaderBytes());
+    const auto sel = slots::select(g.slotCount, 1, region, seed, rawBytes, rawHeaderBytes(headerBytes));
     const auto as  = assignments(sel, {}, pairs);
 
     std::vector<uint8_t> raw(rawBytes, 0);
@@ -331,7 +332,7 @@ std::vector<uint8_t> BlockDct::extract(const Carrier& carrier, Region region, si
 
     ecc::DecodeStats st;
     if (region == Region::Header) {
-        auto out = rs_.decode(raw, kHeaderBytes, &st);
+        auto out = rs_.decode(raw, headerBytes, &st);
         if (!st.ok()) throw std::runtime_error("no valid data found (ECC failed on header)");
         return out;
     }

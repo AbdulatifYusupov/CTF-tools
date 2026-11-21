@@ -35,7 +35,7 @@ AudioLsb::AudioLsb(Options opt) : opt_(opt) {
     if (opt_.threshold < 0) throw std::invalid_argument("threshold must be >= 0");
 }
 
-size_t AudioLsb::capacityBits(const Carrier& carrier) const {
+size_t AudioLsb::capacityBits(const Carrier& carrier, size_t /*headerBytes*/) const {
     const auto* a = std::get_if<AudioData>(&carrier);
     validate(a);
     return eligible(*a, opt_.bitsPerSample, opt_.threshold).size() *
@@ -43,14 +43,14 @@ size_t AudioLsb::capacityBits(const Carrier& carrier) const {
 }
 
 void AudioLsb::embed(Carrier& carrier, Region region, std::span<const uint8_t> data,
-                     const Seed32& seed, const Progress& progress) const {
+                     const Seed32& seed, size_t headerBytes, const Progress& progress) const {
     auto* a = std::get_if<AudioData>(&carrier);
     validate(a);
     if (data.empty()) throw std::invalid_argument("nothing to embed");
 
     const int k      = opt_.bitsPerSample;
     const auto elig  = eligible(*a, k, opt_.threshold);
-    const auto sel   = slots::select(elig.size(), k, region, seed, data.size());
+    const auto sel   = slots::select(elig.size(), k, region, seed, data.size(), headerBytes);
 
     for (size_t j = 0; j < sel.size(); ++j) {
         slots::tick(progress, j, sel.size());
@@ -63,13 +63,14 @@ void AudioLsb::embed(Carrier& carrier, Region region, std::span<const uint8_t> d
 }
 
 std::vector<uint8_t> AudioLsb::extract(const Carrier& carrier, Region region, size_t nBytes,
-                                       const Seed32& seed, const Progress& progress) const {
+                                       const Seed32& seed, size_t headerBytes,
+                                       const Progress& progress) const {
     const auto* a = std::get_if<AudioData>(&carrier);
     validate(a);
 
     const int k     = opt_.bitsPerSample;
     const auto elig = eligible(*a, k, opt_.threshold);
-    const auto sel  = slots::select(elig.size(), k, region, seed, nBytes);
+    const auto sel  = slots::select(elig.size(), k, region, seed, nBytes, headerBytes);
 
     std::vector<uint8_t> out(nBytes, 0);
     const unsigned lowMask = (1u << k) - 1u;

@@ -25,13 +25,13 @@ public:
     explicit AudioLsb(Options opt);
 
     std::string name() const override { return "AudioLSB"; }
-    size_t capacityBits(const Carrier& carrier) const override;
+    size_t capacityBits(const Carrier& carrier, size_t headerBytes) const override;
 
     void embed(Carrier& carrier, Region region, std::span<const uint8_t> data, const Seed32& seed,
-               const Progress& progress = {}) const override;
+               size_t headerBytes, const Progress& progress = {}) const override;
 
     std::vector<uint8_t> extract(const Carrier& carrier, Region region, size_t nBytes,
-                                 const Seed32& seed,
+                                 const Seed32& seed, size_t headerBytes,
                                  const Progress& progress = {}) const override;
 
 private:

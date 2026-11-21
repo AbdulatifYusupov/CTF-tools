@@ -53,6 +53,17 @@ int main() {
     CHECK(usageError({"embed", "--"}));                              // bare "--"
     CHECK(usageError({"keygen", "--progress"}));                     // option of another command
 
+    // password-mode options
+    {
+        const auto a = cli::parseArgs({"embed", "--password-file", "pw.txt", "--ask-password", "--algo", "block-dct"});
+        CHECK(a.get("password-file") == "pw.txt" && a.flag("ask-password") && !a.has("pub"));
+        CHECK(cli::parseArgs({"extract", "--password", "x"}).get("password") == "x");
+        CHECK(cli::parseArgs({"capacity", "--mode", "password"}).get("mode") == "password");
+    }
+    CHECK(usageError({"embed", "--ask-password=yes"}));              // flag with value
+    CHECK(usageError({"keygen", "--password-file", "x"}));           // option of another command
+    CHECK(usageError({"analyze", "--mode", "kem"}));
+
     // helpers
     {
         const auto a = cli::parseArgs({"capacity", "--bits", "two", "--threshold", "12x", "--in", "f"});

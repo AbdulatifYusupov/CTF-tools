@@ -15,9 +15,11 @@ namespace stego {
 
 using Seed32 = std::array<uint8_t, 32>;
 
-// Size of the header region. Must equal crypto::kKemCiphertextSize
-// (static_assert lives in Pipeline.cpp so stego/ stays independent of crypto/).
-inline constexpr size_t kHeaderBytes = 1088;
+// Header region sizes of the two envelope modes. The algorithms do not care which mode is
+// used: they get the header size as a parameter. (static_asserts live in Pipeline.cpp so stego/
+// stays independent of crypto/.)
+inline constexpr size_t kKemHeaderBytes      = 1088;  // ML-KEM-768 ciphertext
+inline constexpr size_t kPasswordHeaderBytes = 16;    // Argon2id salt
 
 // Fixed, PUBLIC seed for header slot positions. Not secret on purpose: the header is an
 // ML-KEM ciphertext (pseudorandom) and must be locatable before any key is known.
@@ -36,7 +38,7 @@ struct AudioData {
 // Image: 8-bit BGR/BGRA cv::Mat (decode JPEG -> save result as PNG, never re-save as JPEG).
 using Carrier = std::variant<cv::Mat, AudioData>;
 
-// Header: first kHeaderBytes, positions from a public constant seed.
+// Header: first `headerBytes`, positions from a public constant seed.
 // Body:   everything else, positions from a secret seed.
 enum class Region { Header, Body };
 
@@ -54,16 +56,17 @@ public:
 
     virtual std::string name() const = 0;
 
-    // Total usable bits for this carrier (header + body). Must not depend on
-    // the data being embedded and must be identical at embed and extract time.
-    virtual size_t capacityBits(const Carrier& carrier) const = 0;
+    // Total usable bits for this carrier (header + body) for a header of `headerBytes`.
+    // Must not depend on the data being embedded and must be identical at embed and extract time.
+    // Plain LSB algorithms ignore headerBytes; BlockDct needs it because its header is RS-expanded.
+    virtual size_t capacityBits(const Carrier& carrier, size_t headerBytes) const = 0;
 
     // CONTRACT (what makes the envelope scheme work):
     //  1. The algorithm builds the list of eligible slots deterministically from
     //     the carrier alone. For adaptive LSB the complexity map is computed on
     //     values with the embedding bits masked out, so it is identical after
     //     embedding.
-    //  2. Region::Header uses the first kHeaderBytes*8 bits' worth of slots of the
+    //  2. Region::Header (exactly `headerBytes` long) uses the first headerBytes*8 bits' worth of slots of the
     //     permutation seeded by kHeaderSeed (the `seed` argument is ignored).
     //  3. Region::Body uses a permutation seeded by `seed` over the eligible
     //     slots EXCLUDING the header's slots (the algorithm recomputes them
@@ -73,11 +76,14 @@ public:
     //  5. Embed Header before Body, or make sure the header slots are excluded
     //     either way. Throw std::invalid_argument on wrong carrier type,
     //     std::length_error on insufficient capacity, OperationCancelled on cancel.
+    //  6. `headerBytes` is the same for the Header and the Body call of one message: the Body
+    //     call needs it to know which slots the header occupies.
     virtual void embed(Carrier& carrier, Region region, std::span<const uint8_t> data,
-                       const Seed32& seed, const Progress& progress = {}) const = 0;
+                       const Seed32& seed, size_t headerBytes,
+                       const Progress& progress = {}) const = 0;
 
     virtual std::vector<uint8_t> extract(const Carrier& carrier, Region region, size_t nBytes,
-                                         const Seed32& seed,
+                                         const Seed32& seed, size_t headerBytes,
                                          const Progress& progress = {}) const = 0;
 };
 

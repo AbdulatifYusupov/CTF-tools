@@ -76,6 +76,19 @@ int main() {
         std::printf("k=%d: OK (max sample change %d)\n", k, maxd);
     }
 
+    // Password mode on the same algorithm
+    {
+        stego::Carrier carrier = synth();
+        const stego::AudioLsb algo(stego::AudioLsb::Options{1, 64});
+        stego::embedMessageWithPassword(algo, carrier, payload, "correct horse battery staple");
+        CHECK(stego::extractMessageWithPassword(algo, carrier, "correct horse battery staple") == payload);
+        bool threw = false;
+        try { (void)stego::extractMessageWithPassword(algo, carrier, "wrong password"); }
+        catch (const std::runtime_error&) { threw = true; }
+        CHECK(threw);
+        std::puts("password mode: OK");
+    }
+
     // FLAC is optional in libsndfile builds: skip quietly if unavailable
     try {
         auto a = synth();

@@ -3,15 +3,22 @@
 //
 //   Header region : [ML-KEM-768 ciphertext, 1088 B]
 //                   -> embedded at positions derived from a PUBLIC constant seed
-//                      (headerSeed()). The ciphertext is pseudorandom, so
+//                      (stego::kHeaderSeed). The ciphertext is pseudorandom, so
 //                      knowing the positions leaks nothing.
 //   Body region   : [len(4B) XOR mask][ChaCha20-Poly1305 ciphertext][tag 16B]
 //                   -> embedded at positions from a permutation seeded by
 //                      Session::bodySeed() = HKDF(shared_secret, "perm").
 //
-// Everything (key, nonce, length mask, permutation seed) comes from the ML-KEM
-// shared secret via HKDF-SHA256 with distinct info labels. The shared secret is
-// fresh per encapsulation, so deriving the nonce is safe (key is never reused).
+// Everything (key, nonce, length mask, permutation seed) comes from one 32-byte master secret
+// via HKDF-SHA256 with distinct info labels. The master secret is fresh per message, so deriving
+// the nonce is safe (key is never reused). Two ways to get it:
+//
+//   KEM mode      master = ML-KEM-768 shared secret.  Header = 1088 B KEM ciphertext.
+//                 Needs a recipient key pair; no offline guessing attack.
+//   Password mode master = Argon2id(password, salt).  Header = 16 B random salt.
+//                 One shared password, tiny header (a huge win for DCT on small images), but
+//                 the file allows offline guessing: strength = password entropy, each guess
+//                 costs one Argon2id run (64 MiB, 3 passes by default).
 //
 // NOTE: ML-KEM uses implicit rejection. A WRONG private key does not fail at
 // decapsulation, it yields a random secret. You only find out when the length
@@ -22,6 +29,7 @@
 #include <cstdint>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace crypto {
@@ -30,6 +38,7 @@ using Bytes  = std::vector<uint8_t>;
 using Seed32 = std::array<uint8_t, 32>;
 
 inline constexpr size_t kKemCiphertextSize = 1088;  // ML-KEM-768
+inline constexpr size_t kSaltSize          = 16;   // Argon2id salt = password-mode header
 inline constexpr size_t kLengthFieldSize   = 4;
 inline constexpr size_t kTagSize           = 16;
 inline constexpr size_t kMaxPayload        = size_t{1} << 28;  // 256 MiB sanity cap
@@ -39,15 +48,21 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+// Argon2id cost (lanes = 1, one thread). These are part of the file format: a message embedded
+// with other values cannot be opened. Defaults: RFC 9106-style 64 MiB, 3 passes (~0.2-0.5 s).
+struct ArgonCost {
+    uint32_t memoryKiB = 64 * 1024;
+    uint32_t iterations = 3;
+};
+
+Bytes randomBytes(size_t n);  // OpenSSL CSPRNG
+
 struct KeyPair {
     Bytes publicKey;   // DER (SubjectPublicKeyInfo)
     Bytes privateKey;  // DER (PKCS#8); keep it secret, wipe when done
 };
 
 KeyPair generateKeyPair();
-
-// Public seed for the header region (SHA-256 of a fixed label).
-Seed32 headerSeed();
 
 class Session {
 public:
@@ -57,6 +72,10 @@ public:
     // Receiver side: kemCiphertext is what was extracted from the header region.
     static Session decapsulate(std::span<const uint8_t> privateKeyDer,
                                std::span<const uint8_t> kemCiphertext);
+
+    // Password mode. salt must be kSaltSize bytes (random, stored as the header).
+    static Session fromPassword(std::string_view password, std::span<const uint8_t> salt,
+                                const ArgonCost& cost = {});
 
     Session(const Session&)            = delete;
     Session& operator=(const Session&) = delete;

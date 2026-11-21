@@ -25,6 +25,11 @@
 #include <iterator>
 #include <memory>
 
+#ifndef _WIN32
+#include <termios.h>
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -50,11 +55,20 @@ const char* kUsageText = R"(stego_cli - hybrid post-quantum steganography (ML-KE
 Commands
   keygen   --out PREFIX [--force]
            Writes PREFIX.pub and PREFIX.key (DER). Keep the .key file secret.
-  capacity --algo A --in COVER [algorithm options]
-  embed    --algo A --in COVER --out STEGO --pub PREFIX.pub (--msg TEXT | --file PATH|-)
+  capacity --algo A --in COVER [--mode kem|password] [algorithm options]
+  embed    --algo A --in COVER --out STEGO  SECRET  (--msg TEXT | --file PATH|-)
            [algorithm options] [--progress]
-  extract  --algo A --in STEGO --key PREFIX.key [--out PATH] [algorithm options] [--progress]
+  extract  --algo A --in STEGO  SECRET  [--out PATH] [algorithm options] [--progress]
            Without --out the message goes to stdout.
+
+  SECRET (exactly one) selects the envelope mode; the file does not say which one was used:
+    KEM mode       embed: --pub PREFIX.pub        extract: --key PREFIX.key
+                   Recipient key pair, 1088-byte header, no offline guessing attack.
+    password mode  --password-file PATH|-   (recommended; one trailing newline is ignored)
+                   --ask-password           (prompts without echo; asked twice when embedding)
+                   --password TEXT          (visible in the process list, avoid)
+                   Argon2id (64 MiB, 3 passes), 16-byte header: far more room on small images.
+                   Security = password strength; an attacker holding the file can guess offline.
   analyze  --cover ORIGINAL --stego STEGO [--lsb-out FILE.png] [--diff-out FILE.png]
 
 Algorithms (--algo)
@@ -207,9 +221,71 @@ stego::Progress makeProgress(bool on, const char* label) {
     };
 }
 
-size_t maxPayloadBytes(size_t capacityBits) {
-    const size_t overhead = stego::kHeaderBytes + crypto::kLengthFieldSize + crypto::kTagSize;
-    return capacityBits / 8 > overhead ? capacityBits / 8 - overhead : 0;
+// ---- secrets: KEM key file or password ------------------------------------------------------------
+
+struct Secret {
+    bool password = false;
+    std::string text;  // password mode
+    Bytes key;         // KEM mode: DER public key (embed) or private key (extract)
+    size_t headerBytes() const { return password ? stego::kPasswordHeaderBytes : stego::kKemHeaderBytes; }
+};
+
+std::string stripLineEnd(std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    return s;
+}
+
+#ifndef _WIN32
+std::string promptHidden(const char* prompt) {
+    FILE* tty = std::fopen("/dev/tty", "r+");
+    if (!tty) throw IoError("no terminal available for --ask-password (use --password-file)");
+    const int fd = fileno(tty);
+    termios saved{}, quiet{};
+    tcgetattr(fd, &saved);
+    quiet = saved;
+    quiet.c_lflag &= static_cast<tcflag_t>(~ECHO);
+    tcsetattr(fd, TCSAFLUSH, &quiet);
+    std::fputs(prompt, tty);
+    std::fflush(tty);
+    char buf[1024];
+    std::string line;
+    if (std::fgets(buf, sizeof buf, tty)) line = buf;
+    tcsetattr(fd, TCSAFLUSH, &saved);
+    std::fputs("\n", tty);
+    std::fclose(tty);
+    return stripLineEnd(line);
+}
+#else
+std::string promptHidden(const char*) { throw IoError("--ask-password is not supported on Windows; use --password-file"); }
+#endif
+
+// Picks exactly one secret source. `keyOption` is "pub" (embed) or "key" (extract).
+Secret readSecret(const cli::Args& a, const char* keyOption, bool confirmPrompt) {
+    const int sources = int(a.has(keyOption)) + int(a.has("password")) + int(a.has("password-file")) +
+                        int(a.flag("ask-password"));
+    if (sources != 1)
+        throw cli::UsageError(std::string("give exactly one of --") + keyOption +
+                              ", --password-file, --ask-password, --password");
+    Secret s;
+    if (a.has(keyOption)) {
+        s.key = readAll(a.get(keyOption));
+        if (s.key.empty()) throw IoError(std::string("empty key file: ") + a.get(keyOption));
+        return s;
+    }
+    s.password = true;
+    if (a.has("password")) {
+        s.text = a.get("password");
+        std::fprintf(stderr, "note: --password is visible in the process list; prefer --password-file or --ask-password\n");
+    } else if (a.has("password-file")) {
+        const Bytes raw = readAll(a.get("password-file"));
+        s.text = stripLineEnd(std::string(raw.begin(), raw.end()));
+    } else {
+        s.text = promptHidden("password: ");
+        if (confirmPrompt && promptHidden("repeat password: ") != s.text)
+            throw cli::UsageError("the passwords do not match");
+    }
+    if (s.text.empty()) throw cli::UsageError("the password is empty");
+    return s;
 }
 
 void printChi(const char* label, const analysis::ChiSquareResult& r) {
@@ -238,9 +314,17 @@ int cmdKeygen(const cli::Args& a) {
 int cmdCapacity(const cli::Args& a) {
     const auto algo      = makeAlgo(a);
     const auto carrier   = loadCarrier(a.require("in"), algo.audio);
-    const size_t cap     = algo.algo->capacityBits(carrier);
-    std::printf("algorithm : %s (%s)\ncapacity  : %zu bits\nmax message: %zu bytes\n", algo.name.c_str(),
-                algo.profile.c_str(), cap, maxPayloadBytes(cap));
+    const std::string mode = a.get("mode", "kem");
+    if (mode != "kem" && mode != "password") throw cli::UsageError("--mode must be 'kem' or 'password'");
+    const size_t header = mode == "kem" ? stego::kKemHeaderBytes : stego::kPasswordHeaderBytes;
+
+    std::printf("algorithm  : %s (%s)\nmode       : %s\n", algo.name.c_str(), algo.profile.c_str(), mode.c_str());
+    std::printf("capacity   : %zu bits\nmax message: %zu bytes\n", algo.algo->capacityBits(carrier, header),
+                stego::maxPayloadBytes(*algo.algo, carrier, header));
+    if (mode == "kem") {
+        std::printf("password   : %zu bytes max with --mode password (smaller header)\n",
+                    stego::maxPayloadBytes(*algo.algo, carrier, stego::kPasswordHeaderBytes));
+    }
     return kOk;
 }
 
@@ -249,6 +333,10 @@ int cmdEmbed(const cli::Args& a) {
     if (a.has("msg") == a.has("file")) throw cli::UsageError("give exactly one of --msg or --file");
     const std::string out = a.require("out");
     checkOutputPath(out, algo.audio);  // fail fast on a lossy extension, before any heavy work
+    const Secret secret = readSecret(a, "pub", /*confirmPrompt=*/true);  // and on bad secret options
+    if (secret.password && secret.text.size() < 12)
+        std::fprintf(stderr, "warning: short password (%zu characters). Anyone holding the file can try guesses offline.\n",
+                     secret.text.size());
 
     Bytes payload;
     if (a.has("msg")) {
@@ -260,21 +348,23 @@ int cmdEmbed(const cli::Args& a) {
     if (payload.empty()) throw cli::UsageError("the message is empty");
     if (payload.size() > crypto::kMaxPayload) throw std::length_error("message too large");
 
-    const Bytes pub = readAll(a.require("pub"));
     stego::Carrier cover   = loadCarrier(a.require("in"), algo.audio);
     stego::Carrier carrier = cover;
     if (!algo.audio) carrier = std::get<cv::Mat>(cover).clone();  // embed works in place
 
-    const size_t cap  = algo.algo->capacityBits(cover);
-    const size_t used = (stego::kHeaderBytes + crypto::kLengthFieldSize + payload.size() + crypto::kTagSize) * 8;
+    const size_t cap  = algo.algo->capacityBits(cover, secret.headerBytes());
+    const size_t used = (secret.headerBytes() + crypto::kLengthFieldSize + payload.size() + crypto::kTagSize) * 8;
 
     const auto progress = makeProgress(a.flag("progress"), "embedding");
-    stego::embedMessage(*algo.algo, carrier, payload, pub, progress);
+    if (secret.password) stego::embedMessageWithPassword(*algo.algo, carrier, payload, secret.text, progress);
+    else stego::embedMessage(*algo.algo, carrier, payload, secret.key, progress);
     if (a.flag("progress")) std::fprintf(stderr, "\n");
 
     saveCarrier(out, carrier, algo.audio);
 
     std::printf("algorithm : %s\nprofile   : %s   (reuse at extraction)\n", algo.name.c_str(), algo.profile.c_str());
+    std::printf("mode      : %s\n", secret.password ? "password (Argon2id 64 MiB x3), extract with the same password"
+                                                    : "kem (ML-KEM-768), extract with the matching .key");
     std::printf("capacity  : %zu bits, used %zu bits (%.1f%%)\n", cap, used, 100.0 * static_cast<double>(used) / static_cast<double>(cap));
 
     if (!algo.audio) {
@@ -304,18 +394,19 @@ int cmdEmbed(const cli::Args& a) {
 
 int cmdExtract(const cli::Args& a) {
     const auto algo    = makeAlgo(a);
-    const Bytes key    = readAll(a.require("key"));
-    const auto carrier = loadCarrier(a.require("in"), algo.audio);
+    const Secret secret = readSecret(a, "key", /*confirmPrompt=*/false);
+    const auto carrier  = loadCarrier(a.require("in"), algo.audio);
 
     const auto progress = makeProgress(a.flag("progress"), "extracting");
     Bytes message;
     try {
-        message = stego::extractMessage(*algo.algo, carrier, key, progress);
+        message = secret.password ? stego::extractMessageWithPassword(*algo.algo, carrier, secret.text, progress)
+                                  : stego::extractMessage(*algo.algo, carrier, secret.key, progress);
     } catch (const stego::OperationCancelled&) {
         throw;
     } catch (const std::runtime_error& e) {
-        throw ExtractFailure(std::string("no message found: wrong key or parameters, no hidden data, or the file was "
-                                         "modified (") + e.what() + ")");
+        throw ExtractFailure(std::string("no message found: wrong key/password or parameters, wrong mode, no hidden data, "
+                                         "or the file was modified (") + e.what() + ")");
     } catch (const std::length_error&) {
         throw ExtractFailure("the file is too small to contain a message");
     }

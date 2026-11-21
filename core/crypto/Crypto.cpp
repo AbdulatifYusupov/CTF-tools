@@ -6,6 +6,7 @@
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 #include <openssl/params.h>
+#include <openssl/rand.h>
 #include <openssl/x509.h>
 
 #include <memory>
@@ -77,13 +78,10 @@ KeyPair generateKeyPair() {
     return kp;
 }
 
-Seed32 headerSeed() {
-    static constexpr std::string_view label = "stego/v1/header-positions";
-    Seed32 out{};
-    unsigned int len = 0;
-    if (EVP_Digest(label.data(), label.size(), out.data(), &len, EVP_sha256(), nullptr) != 1)
-        fail("SHA-256");
-    return out;
+Bytes randomBytes(size_t n) {
+    Bytes b(n);
+    if (n != 0 && RAND_bytes(b.data(), static_cast<int>(n)) != 1) fail("RAND_bytes");
+    return b;
 }
 
 // ---- Session -------------------------------------------------------------------
@@ -142,6 +140,36 @@ Session Session::decapsulate(std::span<const uint8_t> priv, std::span<const uint
 
     Session s{std::span<const uint8_t>(ss)};
     OPENSSL_cleanse(ss.data(), ss.size());
+    return s;
+}
+
+Session Session::fromPassword(std::string_view password, std::span<const uint8_t> salt,
+                              const ArgonCost& cost) {
+    if (password.empty()) throw Error("empty password");
+    if (salt.size() != kSaltSize) throw Error("bad salt size");
+    if (cost.memoryKiB < 8 || cost.iterations < 1) throw Error("bad Argon2 cost");
+
+    KdfPtr kdf(EVP_KDF_fetch(nullptr, "ARGON2ID", nullptr));
+    if (!kdf) fail("Argon2id not available (needs OpenSSL >= 3.2)");
+    KdfCtxPtr ctx(EVP_KDF_CTX_new(kdf.get()));
+    if (!ctx) fail("EVP_KDF_CTX_new");
+
+    uint32_t iterations = cost.iterations, memory = cost.memoryKiB, lanes = 1;
+    OSSL_PARAM params[] = {
+        OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_PASSWORD, const_cast<char*>(password.data()),
+                                          password.size()),
+        OSSL_PARAM_construct_octet_string(OSSL_KDF_PARAM_SALT, const_cast<uint8_t*>(salt.data()),
+                                          salt.size()),
+        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ITER, &iterations),
+        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_LANES, &lanes),
+        OSSL_PARAM_construct_uint32(OSSL_KDF_PARAM_ARGON2_MEMCOST, &memory),
+        OSSL_PARAM_construct_end()};
+
+    std::array<uint8_t, 32> secret{};
+    if (EVP_KDF_derive(ctx.get(), secret.data(), secret.size(), params) <= 0) fail("Argon2id derive");
+
+    Session s{secret};
+    OPENSSL_cleanse(secret.data(), secret.size());
     return s;
 }
 

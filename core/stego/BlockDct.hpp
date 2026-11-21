@@ -22,7 +22,7 @@ namespace stego {
 //
 // ECC is built in, because DCT embedding is lossy per block and a single wrong bit in the
 // ML-KEM header would ruin decapsulation:
-//   Header: RS(encode(1088 B))
+//   Header: RS(encode(header))     (1088 B ML-KEM ciphertext, or 16 B Argon2id salt)
 //   Body:   RS block of the first 4 bytes (the length field) || RS stream of the rest
 // The tiny first block lets the receiver learn the length before it knows how much to read.
 //
@@ -37,8 +37,9 @@ namespace stego {
 // the payload survive JPEG).
 //
 // pairsPerBlock and paritySymbols must be identical at embed and extract; strength need not.
-// Realistic capacity (pairs=2, parity=32): ~ (W/8)*(H/8)*2 raw bits, of which ~10 kbit goes to
-// the ML-KEM header. A 1024x768 image carries ~1.8 KB of payload. Output must stay lossless (PNG).
+// Realistic capacity (pairs=2, parity=32): ~ (W/8)*(H/8)*2 raw bits. The ML-KEM header takes
+// ~10 kbit of that (a 1024x768 image then carries ~1.5 KB of payload); the password header
+// (16 B salt) takes ~0.4 kbit (~2.9 KB on the same image). Output must stay lossless (PNG).
 class BlockDct final : public IStegoAlgorithm {
 public:
     struct Options {
@@ -51,18 +52,18 @@ public:
     explicit BlockDct(Options opt);
 
     std::string name() const override { return "BlockDCT"; }
-    size_t capacityBits(const Carrier& carrier) const override;
+    size_t capacityBits(const Carrier& carrier, size_t headerBytes) const override;
 
     void embed(Carrier& carrier, Region region, std::span<const uint8_t> data, const Seed32& seed,
-               const Progress& progress = {}) const override;
+               size_t headerBytes, const Progress& progress = {}) const override;
 
     // Throws std::runtime_error if ECC cannot recover the data ("no data or too damaged").
     std::vector<uint8_t> extract(const Carrier& carrier, Region region, size_t nBytes,
-                                 const Seed32& seed,
+                                 const Seed32& seed, size_t headerBytes,
                                  const Progress& progress = {}) const override;
 
 private:
-    size_t rawHeaderBytes() const;
+    size_t rawHeaderBytes(size_t headerBytes) const;
     size_t rawBodyBytes(size_t bodyBytes) const;
     std::vector<uint8_t> packHeader(std::span<const uint8_t> data) const;
     std::vector<uint8_t> packBody(std::span<const uint8_t> data) const;

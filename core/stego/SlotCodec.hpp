@@ -13,13 +13,12 @@ namespace stego::slots {
 // Slot indices (into [0, slotCount)) that carry `nBytes` of data for `region`, in embedding order.
 // Header: first rawHeaderBytes*8/k slots of the permutation seeded by kHeaderSeed.
 // Body:   permutation seeded by bodySeed, header slots skipped. Prefix-stable in nBytes.
-// rawHeaderBytes is what the header occupies in the carrier. It equals kHeaderBytes unless the
-// algorithm expands it (BlockDct adds Reed-Solomon parity), and must be the same at embed and
-// extract. Throws std::length_error if there are not enough slots, std::invalid_argument if a
+// rawHeaderBytes is what the header occupies in the carrier: the header size itself, or more if
+// the algorithm expands it (BlockDct adds Reed-Solomon parity). Same at embed and extract. Throws std::length_error if there are not enough slots, std::invalid_argument if a
 // Header request is not exactly rawHeaderBytes.
 std::vector<uint32_t> select(size_t slotCount, int bitsPerSlot, Region region,
                              const Seed32& bodySeed, size_t nBytes,
-                             size_t rawHeaderBytes = kHeaderBytes);
+                             size_t rawHeaderBytes);
 
 // What to write into slot j. Stream bits are taken MSB-first from `data`; the last slot may
 // carry fewer than k bits, then only those bits are touched.

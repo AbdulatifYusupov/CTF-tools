@@ -42,7 +42,8 @@ int main() {
     stego::Carrier carrier = cover.clone();
     const stego::BlockDct algo;  // defaults: pairs=2, strength=12, parity=32
 
-    CHECK(algo.capacityBits(carrier) >= (stego::kHeaderBytes + 4 + 16 + payload.size()) * 8);
+    CHECK(algo.capacityBits(carrier, stego::kKemHeaderBytes) >=
+          (stego::kKemHeaderBytes + 4 + 16 + payload.size()) * 8);
     stego::embedMessage(algo, carrier, payload, kp.publicKey);
 
     const cv::Mat& res = std::get<cv::Mat>(carrier);
@@ -93,6 +94,45 @@ int main() {
     try { stego::embedMessage(algo, small, payload, kp.publicKey); }
     catch (const std::length_error&) { threw = true; }
     CHECK(threw);
+
+    // ---- password mode: a 16-byte header instead of 1088 makes small images usable ---------------
+    {
+        const std::string pw = "correct horse battery staple";
+
+        // same big image: clearly more room than KEM mode (the header cost ~10 kbit less)
+        CHECK(stego::maxPayloadBytes(algo, carrier, stego::kPasswordHeaderBytes) >
+              stego::maxPayloadBytes(algo, carrier, stego::kKemHeaderBytes) + 900);
+
+        stego::Carrier pc = cover.clone();
+        stego::embedMessageWithPassword(algo, pc, payload, pw);
+        CHECK(stego::extractMessageWithPassword(algo, pc, pw) == payload);
+
+        threw = false;
+        try { (void)stego::extractMessageWithPassword(algo, pc, "wrong password"); }
+        catch (const std::runtime_error&) { threw = true; }
+        CHECK(threw);
+
+        // a file made in one mode must not be readable as the other
+        threw = false;
+        try { (void)stego::extractMessage(algo, pc, kp.privateKey); }
+        catch (const std::runtime_error&) { threw = true; }
+        CHECK(threw);
+
+        // 256x256 photo-like image: KEM mode cannot fit anything, password mode carries 100 bytes
+        cv::Mat t(256, 256, CV_8UC3);
+        cv::RNG r(8);
+        for (int y = 0; y < 256; ++y)
+            for (int x = 0; x < 256; ++x)
+                for (int c = 0; c < 3; ++c)
+                    t.at<cv::Vec3b>(y, x)[c] = cv::saturate_cast<uint8_t>(
+                        128 + 60 * std::sin(x / 29.0 + c) * std::cos(y / 41.0) + r.gaussian(5.0));
+        stego::Carrier tiny = t;
+        const crypto::Bytes small100(payload.begin(), payload.begin() + 100);
+        CHECK(stego::maxPayloadBytes(algo, tiny, stego::kKemHeaderBytes) == 0);
+        CHECK(stego::maxPayloadBytes(algo, tiny, stego::kPasswordHeaderBytes) >= 100);
+        stego::embedMessageWithPassword(algo, tiny, small100, pw);
+        CHECK(stego::extractMessageWithPassword(algo, tiny, pw) == small100);
+    }
 
     std::puts("block_dct_roundtrip: OK");
     return 0;

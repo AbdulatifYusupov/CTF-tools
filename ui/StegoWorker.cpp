@@ -34,8 +34,8 @@ void runEmbed(QPromise<EmbedOutcome>& promise, AlgoPtr algo, cv::Mat cover, QByt
         EmbedReport rep;
         stego::Carrier carrier = cover.clone();  // embed() works in place
 
-        rep.capacityBits = algo->capacityBits(carrier);
-        rep.usedBits = (stego::kHeaderBytes + crypto::kLengthFieldSize +
+        rep.capacityBits = algo->capacityBits(carrier, stego::kKemHeaderBytes);
+        rep.usedBits = (stego::kKemHeaderBytes + crypto::kLengthFieldSize +
                         static_cast<size_t>(payload.size()) + crypto::kTagSize) * 8;
         throwIfCanceled(promise);
 

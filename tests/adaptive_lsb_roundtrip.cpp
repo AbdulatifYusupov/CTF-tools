@@ -60,6 +60,21 @@ int main() {
 
         std::printf("k=%d: OK (max pixel change %.0f)\n", k, mx);
     }
+    // Password mode on the same algorithm
+    {
+        cv::Mat img(256, 256, CV_8UC3);
+        cv::RNG(12345).fill(img, cv::RNG::UNIFORM, 0, 256);
+        stego::Carrier carrier = img.clone();
+        const stego::AdaptiveLsb algo(stego::AdaptiveLsb::Options{1, 32});
+        stego::embedMessageWithPassword(algo, carrier, payload, "correct horse battery staple");
+        CHECK(stego::extractMessageWithPassword(algo, carrier, "correct horse battery staple") == payload);
+        bool threw = false;
+        try { (void)stego::extractMessageWithPassword(algo, carrier, "wrong password"); }
+        catch (const std::runtime_error&) { threw = true; }
+        CHECK(threw);
+        std::puts("password mode: OK");
+    }
+
     std::puts("adaptive_lsb_roundtrip: OK");
     return 0;
 }

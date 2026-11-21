@@ -89,6 +89,7 @@ int main(int argc, char** argv) {
     // inputs
     CHECK(cv::imwrite(p("cover.png"), makeImage(1024, 768)));
     CHECK(cv::imwrite(p("tiny.png"), makeImage(64, 64)));
+    CHECK(cv::imwrite(p("small.png"), makeImage(256, 256)));
     stego::writeAudio(p("cover.wav"), makeAudio());
     {
         std::mt19937 rng(77);
@@ -97,6 +98,12 @@ int main(int argc, char** argv) {
     }
     const std::string msg = slurp(p("msg.bin"));
     CHECK(msg.size() == 300);
+    {
+        std::ofstream(p("msg100.bin"), std::ios::binary).write(msg.data(), 100);
+        std::ofstream(p("pw.txt")) << "correct horse battery staple\n";  // trailing newline must be ignored
+        std::ofstream(p("wrong.txt")) << "not the password\n";
+        std::ofstream(p("empty.txt"));
+    }
 
     // keys
     CHECK(cli("keygen --out " + q(p("k"))) == 0);
@@ -128,6 +135,40 @@ int main(int argc, char** argv) {
         // a file with no message -> exit 3
         CHECK(cli("extract " + common + " --in " + q(p(c.cover)) + " --key " + q(p("k.key"))) == 3);
     }
+
+    // ---- password mode: same four configurations, plus the failure cases ----------------------------
+    for (const auto& c : cases) {
+        const std::string common = std::string("--algo ") + c.algo + " " + c.extra;
+        const std::string out    = std::string("pw_") + c.out;
+        CHECK(cli("capacity " + common + " --mode password --in " + q(p(c.cover))) == 0);
+        CHECK(cli("embed " + common + " --in " + q(p(c.cover)) + " --out " + q(p(out)) + " --password-file " +
+                  q(p("pw.txt")) + " --file " + q(p("msg.bin"))) == 0);
+        CHECK(cli("extract " + common + " --in " + q(p(out)) + " --password-file " + q(p("pw.txt")) + " --out " +
+                  q(p("got.bin"))) == 0);
+        CHECK(slurp(p("got.bin")) == msg);
+        CHECK(cli("extract " + common + " --in " + q(p(out)) + " --password-file " + q(p("wrong.txt"))) == 3);
+        CHECK(cli("extract " + common + " --in " + q(p(out)) + " --key " + q(p("k.key"))) == 3);  // wrong mode
+        std::printf("%s %s: password roundtrip OK\n", c.algo, c.extra);
+    }
+    // a KEM-mode file read as password mode
+    CHECK(cli("extract --algo adaptive-lsb --in " + q(p("s_lsb.png")) + " --password-file " + q(p("pw.txt"))) == 3);
+
+    // the reason password mode exists: a 256x256 image fits 100 bytes only with the small header
+    CHECK(cli("embed --algo block-dct --in " + q(p("small.png")) + " --out " + q(p("x.png")) + " --pub " +
+              q(p("k.pub")) + " --file " + q(p("msg100.bin"))) == 4);
+    CHECK(cli("embed --algo block-dct --in " + q(p("small.png")) + " --out " + q(p("s_small.png")) +
+              " --password-file " + q(p("pw.txt")) + " --file " + q(p("msg100.bin"))) == 0);
+    CHECK(cli("extract --algo block-dct --in " + q(p("s_small.png")) + " --password-file " + q(p("pw.txt")) +
+              " --out " + q(p("got100.bin"))) == 0);
+    CHECK(slurp(p("got100.bin")) == msg.substr(0, 100));
+
+    // secret option misuse -> exit 2, before any heavy work
+    const std::string base = "embed --algo adaptive-lsb --in " + q(p("cover.png")) + " --out " + q(p("x.png")) + " --msg hi";
+    CHECK(cli(base) == 2);                                                                    // no secret at all
+    CHECK(cli(base + " --pub " + q(p("k.pub")) + " --password-file " + q(p("pw.txt"))) == 2);  // two sources
+    CHECK(cli(base + " --password-file " + q(p("empty.txt"))) == 2);                          // empty password
+    CHECK(cli("extract --algo adaptive-lsb --in " + q(p("s_lsb.png")) + " --key " + q(p("k.key")) +
+              " --password x") == 2);
 
     // --msg path and stdout extraction
     CHECK(cli("embed --algo adaptive-lsb --in " + q(p("cover.png")) + " --out " + q(p("s_txt.png")) + " --pub " +

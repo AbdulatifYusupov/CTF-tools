@@ -69,7 +69,7 @@ AdaptiveLsb::AdaptiveLsb(Options opt) : opt_(opt) {
     if (opt_.threshold < 0) throw std::invalid_argument("threshold must be >= 0");
 }
 
-size_t AdaptiveLsb::capacityBits(const Carrier& carrier) const {
+size_t AdaptiveLsb::capacityBits(const Carrier& carrier, size_t /*headerBytes*/) const {
     const auto* m = std::get_if<cv::Mat>(&carrier);
     validate(m);
     return buildSpace(*m, opt_.bitsPerChannel, opt_.threshold).slotCount() *
@@ -77,14 +77,14 @@ size_t AdaptiveLsb::capacityBits(const Carrier& carrier) const {
 }
 
 void AdaptiveLsb::embed(Carrier& carrier, Region region, std::span<const uint8_t> data,
-                        const Seed32& seed, const Progress& progress) const {
+                        const Seed32& seed, size_t headerBytes, const Progress& progress) const {
     auto* img = std::get_if<cv::Mat>(&carrier);
     validate(img);
     if (data.empty()) throw std::invalid_argument("nothing to embed");
 
     const int k    = opt_.bitsPerChannel;
     const auto sp  = buildSpace(*img, k, opt_.threshold);
-    const auto sel = slots::select(sp.slotCount(), k, region, seed, data.size());
+    const auto sel = slots::select(sp.slotCount(), k, region, seed, data.size(), headerBytes);
 
     for (size_t j = 0; j < sel.size(); ++j) {
         slots::tick(progress, j, sel.size());
@@ -96,13 +96,14 @@ void AdaptiveLsb::embed(Carrier& carrier, Region region, std::span<const uint8_t
 }
 
 std::vector<uint8_t> AdaptiveLsb::extract(const Carrier& carrier, Region region, size_t nBytes,
-                                          const Seed32& seed, const Progress& progress) const {
+                                          const Seed32& seed, size_t headerBytes,
+                                          const Progress& progress) const {
     const auto* img = std::get_if<cv::Mat>(&carrier);
     validate(img);
 
     const int k    = opt_.bitsPerChannel;
     const auto sp  = buildSpace(*img, k, opt_.threshold);
-    const auto sel = slots::select(sp.slotCount(), k, region, seed, nBytes);
+    const auto sel = slots::select(sp.slotCount(), k, region, seed, nBytes, headerBytes);
 
     std::vector<uint8_t> out(nBytes, 0);
     const unsigned lowMask = (1u << k) - 1u;
