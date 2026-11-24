@@ -8,13 +8,14 @@ const std::map<std::string, CommandSpec>& commandSpecs() {
     static const std::map<std::string, CommandSpec> specs = {
         {"help", {{}, {}}},
         {"keygen", {{"out"}, {"force"}}},
-        {"capacity", {{"algo", "in", "mode", "bits", "threshold", "pairs", "parity"}, {}}},
+        {"capacity", {{"algo", "in", "mode", "profile", "bits", "threshold", "pairs", "parity"}, {}}},
         {"embed",
-         {{"algo", "in", "out", "pub", "password", "password-file", "msg", "file", "bits", "threshold", "strength",
-           "pairs", "parity"},
+         {{"algo", "in", "out", "pub", "password", "password-file", "msg", "file", "profile-out", "bits",
+           "threshold", "strength", "pairs", "parity"},
           {"progress", "ask-password"}}},
         {"extract",
-         {{"algo", "in", "key", "password", "password-file", "out", "bits", "threshold", "pairs", "parity"},
+         {{"algo", "in", "key", "password", "password-file", "out", "profile", "bits", "threshold", "pairs",
+           "parity"},
           {"progress", "ask-password"}}},
         {"analyze", {{"cover", "stego", "lsb-out", "diff-out"}, {}}},
     };

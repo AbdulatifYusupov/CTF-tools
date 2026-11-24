@@ -35,6 +35,8 @@ add_library(stego_core STATIC
     core/stego/BlockDct.cpp
     core/ecc/ReedSolomon.cpp
     core/analysis/Metrics.cpp
+    core/analysis/Steganalysis.cpp
+    core/analysis/LsbDetection.cpp
 )
 target_include_directories(stego_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
 target_link_libraries(stego_core PUBLIC
@@ -63,7 +65,7 @@ add_executable(stego_gui
 target_link_libraries(stego_gui PRIVATE stego_worker Qt6::Widgets)
 
 # ---- CLI --------------------------------------------------------------------
-add_library(stego_cli_args STATIC cli/Args.cpp)
+add_library(stego_cli_args STATIC cli/Args.cpp cli/Profile.cpp)
 target_include_directories(stego_cli_args PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cli)
 
 add_executable(stego_cli cli/main.cpp)
@@ -95,6 +97,10 @@ add_executable(metrics_test tests/metrics_test.cpp)
 target_link_libraries(metrics_test PRIVATE stego_core)
 add_test(NAME metrics_test COMMAND metrics_test)
 
+add_executable(steganalysis_test tests/steganalysis_test.cpp)
+target_link_libraries(steganalysis_test PRIVATE stego_core)
+add_test(NAME steganalysis_test COMMAND steganalysis_test)
+
 add_executable(adaptive_lsb_roundtrip tests/adaptive_lsb_roundtrip.cpp)
 target_link_libraries(adaptive_lsb_roundtrip PRIVATE stego_core)
 add_test(NAME adaptive_lsb_roundtrip COMMAND adaptive_lsb_roundtrip)
@@ -102,6 +108,10 @@ add_test(NAME adaptive_lsb_roundtrip COMMAND adaptive_lsb_roundtrip)
 add_executable(cli_args_test tests/cli_args_test.cpp)
 target_link_libraries(cli_args_test PRIVATE stego_cli_args)
 add_test(NAME cli_args_test COMMAND cli_args_test)
+
+add_executable(cli_profile_test tests/cli_profile_test.cpp)
+target_link_libraries(cli_profile_test PRIVATE stego_cli_args)
+add_test(NAME cli_profile_test COMMAND cli_profile_test)
 
 add_executable(cli_e2e_test tests/cli_e2e_test.cpp)
 target_link_libraries(cli_e2e_test PRIVATE stego_core)

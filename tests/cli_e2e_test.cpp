@@ -103,6 +103,7 @@ int main(int argc, char** argv) {
         std::ofstream(p("pw.txt")) << "correct horse battery staple\n";  // trailing newline must be ignored
         std::ofstream(p("wrong.txt")) << "not the password\n";
         std::ofstream(p("empty.txt"));
+        std::ofstream(p("bad.json")) << "{ not json";
     }
 
     // keys
@@ -161,6 +162,29 @@ int main(int argc, char** argv) {
     CHECK(cli("extract --algo block-dct --in " + q(p("s_small.png")) + " --password-file " + q(p("pw.txt")) +
               " --out " + q(p("got100.bin"))) == 0);
     CHECK(slurp(p("got100.bin")) == msg.substr(0, 100));
+
+    // ---- profile: extract without repeating a single algorithm option ----------------------------------
+    CHECK(cli("embed --algo adaptive-lsb --bits 2 --threshold 24 --in " + q(p("cover.png")) + " --out " +
+              q(p("s_prof.png")) + " --pub " + q(p("k.pub")) + " --file " + q(p("msg.bin")) + " --profile-out " +
+              q(p("prof.json"))) == 0);
+    CHECK(fs::exists(p("prof.json")));
+    CHECK(cli("extract --profile " + q(p("prof.json")) + " --in " + q(p("s_prof.png")) + " --key " + q(p("k.key")) +
+              " --out " + q(p("got.bin"))) == 0);
+    CHECK(slurp(p("got.bin")) == msg);
+    CHECK(cli("capacity --profile " + q(p("prof.json")) + " --in " + q(p("cover.png"))) == 0);
+    CHECK(cli("extract --profile " + q(p("prof.json")) + " --bits 1 --in " + q(p("s_prof.png")) + " --key " +
+              q(p("k.key"))) == 2);                                        // explicit option contradicts the profile
+    CHECK(cli("extract --profile " + q(p("prof.json")) + " --in " + q(p("s_prof.png")) + " --password-file " +
+              q(p("pw.txt"))) == 2);                                       // profile says kem, secret says password
+    CHECK(cli("extract --profile " + q(p("bad.json")) + " --in " + q(p("s_prof.png")) + " --key " + q(p("k.key"))) == 2);
+    CHECK(cli("extract --profile " + q(p("missing.json")) + " --in " + q(p("s_prof.png")) + " --key " + q(p("k.key"))) == 5);
+    // block-dct + password with non-default parameters, again only via the profile
+    CHECK(cli("embed --algo block-dct --pairs 3 --parity 24 --in " + q(p("small.png")) + " --out " + q(p("s_prof2.png")) +
+              " --password-file " + q(p("pw.txt")) + " --file " + q(p("msg100.bin")) + " --profile-out " + q(p("prof2.json"))) == 0);
+    CHECK(cli("extract --profile " + q(p("prof2.json")) + " --in " + q(p("s_prof2.png")) + " --password-file " +
+              q(p("pw.txt")) + " --out " + q(p("got100.bin"))) == 0);
+    CHECK(slurp(p("got100.bin")) == msg.substr(0, 100));
+    CHECK(slurp(p("prof2.json")).find("\"pairs\": 3") != std::string::npos);
 
     // secret option misuse -> exit 2, before any heavy work
     const std::string base = "embed --algo adaptive-lsb --in " + q(p("cover.png")) + " --out " + q(p("x.png")) + " --msg hi";

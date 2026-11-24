@@ -10,3 +10,6 @@ CMakeLists.txt.user*
 *.so
 .vscode/
 .idea/
+*.csv
+__pycache__/
+*.pyc

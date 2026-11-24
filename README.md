@@ -15,9 +15,9 @@ export OPENSSL_ROOT_DIR=$HOME/.local/openssl-3.5.10
 bash scripts/build.sh               # configure + build + run all tests
 ```
 
-Expected: 9 tests, all `Passed`:
+Expected: 11 tests, all `Passed`:
 `crypto_roundtrip`, `adaptive_lsb_roundtrip`, `audio_lsb_roundtrip`, `block_dct_roundtrip`,
-`reed_solomon_test`, `metrics_test`, `stego_worker_test`, `cli_args_test`, `cli_e2e_test`.
+`reed_solomon_test`, `metrics_test`, `steganalysis_test`, `stego_worker_test`, `cli_args_test`, `cli_profile_test`, `cli_e2e_test`.
 
 If something fails, paste the FIRST compiler error (or the failing test's output). Later errors are
 usually fallout from the first one.
@@ -53,7 +53,20 @@ build/stego_cli embed   --algo block-dct --in small.png --out s.png --password-f
 build/stego_cli extract --algo block-dct --in s.png --password-file pw.txt
 ```
 
-`embed` prints a profile line (`pairs=2 parity=32`, ...). Pass the same algorithm options to `extract`.
+### Profiles: do not memorise parameters
+
+`pairs`, `parity`, `threshold` and `bits` are not stored in the file (no magic bytes), and without
+the right values nothing can be extracted. Let `embed` write them down and hand the profile to `extract`:
+
+```bash
+build/stego_cli embed   --algo block-dct --pairs 3 --parity 24 --in a.png --out s.png \
+                        --password-file pw.txt --msg "hi" --profile-out s.profile.json
+build/stego_cli extract --profile s.profile.json --in s.png --password-file pw.txt
+```
+
+The profile holds the algorithm, its parameters and the mode, never a key or password, so it can travel
+with the file. An explicit option that contradicts the profile is an error, not a silent override.
+Without a profile, repeat the same algorithm options by hand (`embed` prints them).
 Exit codes: 0 ok, 2 bad arguments, 3 no message / wrong key / damaged file, 4 does not fit, 5 I/O error.
 
 ## Layout

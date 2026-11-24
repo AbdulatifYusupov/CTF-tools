@@ -31,6 +31,9 @@ public:
     std::string require(const std::string& name) const;  // throws UsageError when missing
     int getInt(const std::string& name, int fallback) const;  // throws UsageError if not an integer
 
+    // Programmatic override, used when a profile is merged in (see Profile.hpp).
+    void set(const std::string& name, const std::string& value) { values_[name] = value; }
+
 private:
     friend Args parseArgs(const std::vector<std::string>& argv);
     std::map<std::string, std::string> values_;

@@ -3,7 +3,9 @@
 // Exit codes:  0 ok | 1 other error | 2 bad arguments | 3 nothing found / wrong key / damaged file
 //              4 message does not fit | 5 file I/O error | 130 cancelled
 #include "Args.hpp"
+#include "Profile.hpp"
 
+#include "analysis/LsbDetection.hpp"
 #include "analysis/Metrics.hpp"
 #include "crypto/Crypto.hpp"
 #include "stego/AdaptiveLsb.hpp"
@@ -55,10 +57,10 @@ const char* kUsageText = R"(stego_cli - hybrid post-quantum steganography (ML-KE
 Commands
   keygen   --out PREFIX [--force]
            Writes PREFIX.pub and PREFIX.key (DER). Keep the .key file secret.
-  capacity --algo A --in COVER [--mode kem|password] [algorithm options]
+  capacity --algo A --in COVER [--mode kem|password] [algorithm options | --profile FILE.json]
   embed    --algo A --in COVER --out STEGO  SECRET  (--msg TEXT | --file PATH|-)
-           [algorithm options] [--progress]
-  extract  --algo A --in STEGO  SECRET  [--out PATH] [algorithm options] [--progress]
+           [algorithm options] [--profile-out FILE.json] [--progress]
+  extract  --in STEGO  SECRET  [--out PATH] (--algo A [algorithm options] | --profile FILE.json) [--progress]
            Without --out the message goes to stdout.
 
   SECRET (exactly one) selects the envelope mode; the file does not say which one was used:
@@ -70,6 +72,7 @@ Commands
                    Argon2id (64 MiB, 3 passes), 16-byte header: far more room on small images.
                    Security = password strength; an attacker holding the file can guess offline.
   analyze  --cover ORIGINAL --stego STEGO [--lsb-out FILE.png] [--diff-out FILE.png]
+           PSNR, SSIM, chi-square, and blind LSB-replacement estimates (RS, sample pairs) per channel.
 
 Algorithms (--algo)
   adaptive-lsb   images       --bits 1|2 (default 1)  --threshold N (default 32)
@@ -79,7 +82,9 @@ Algorithms (--algo)
 
 Rules
   * Algorithm options (except --strength) must be IDENTICAL at embed and extract.
-    embed prints the profile line you need to reuse.
+    Instead of repeating them, save a profile with  embed --profile-out p.json  and pass
+    --profile p.json to extract/capacity. It holds the algorithm, its parameters and the mode,
+    but no secrets, so it can travel next to the file. Explicit options that contradict it are errors.
   * Images are written losslessly (.png, .bmp, .tif); audio as .wav, .flac or .aiff.
     Any lossy re-encode (JPEG, MP3, messenger compression) destroys the message.
 
@@ -123,6 +128,7 @@ struct AlgoChoice {
     bool audio = false;
     std::string name;
     std::string profile;  // what must be identical at extraction
+    cli::ProfileMap params;  // the same, machine readable (for --profile-out)
 };
 
 void rejectUnused(const cli::Args& a, const std::string& algo, std::initializer_list<const char*> names) {
@@ -140,6 +146,7 @@ AlgoChoice makeAlgo(const cli::Args& a) {
         o.threshold      = a.getInt("threshold", o.threshold);
         c.algo           = std::make_shared<const stego::AdaptiveLsb>(o);
         c.profile        = "bits=" + std::to_string(o.bitsPerChannel) + " threshold=" + std::to_string(o.threshold);
+        c.params         = {{"bits", std::to_string(o.bitsPerChannel)}, {"threshold", std::to_string(o.threshold)}};
     } else if (c.name == "audio-lsb") {
         rejectUnused(a, c.name, {"pairs", "parity", "strength"});
         stego::AudioLsb::Options o;
@@ -148,6 +155,7 @@ AlgoChoice makeAlgo(const cli::Args& a) {
         c.algo          = std::make_shared<const stego::AudioLsb>(o);
         c.audio         = true;
         c.profile       = "bits=" + std::to_string(o.bitsPerSample) + " threshold=" + std::to_string(o.threshold);
+        c.params        = {{"bits", std::to_string(o.bitsPerSample)}, {"threshold", std::to_string(o.threshold)}};
     } else if (c.name == "block-dct") {
         rejectUnused(a, c.name, {"bits", "threshold"});
         stego::BlockDct::Options o;
@@ -156,6 +164,7 @@ AlgoChoice makeAlgo(const cli::Args& a) {
         o.strength      = a.getInt("strength", o.strength);
         c.algo          = std::make_shared<const stego::BlockDct>(o);
         c.profile       = "pairs=" + std::to_string(o.pairsPerBlock) + " parity=" + std::to_string(o.paritySymbols);
+        c.params        = {{"pairs", std::to_string(o.pairsPerBlock)}, {"parity", std::to_string(o.paritySymbols)}};
     } else {
         throw cli::UsageError("unknown algorithm '" + c.name + "' (adaptive-lsb | audio-lsb | block-dct)");
     }
@@ -292,6 +301,31 @@ void printChi(const char* label, const analysis::ChiSquareResult& r) {
     std::printf("%-10s chi2=%.1f dof=%d p(embedded)=%.4f\n", label, r.chi2, r.dof, r.pEmbedded);
 }
 
+// RS / sample-pairs line: mean over the valid channels, then the per-channel values (B G R).
+// '*' marks an estimate that came from the double-root fallback (p close to 1).
+void printLsb(const char* name, const char* label, const std::vector<analysis::LsbDetection>& d, bool rs) {
+    static const char* const kNames[] = {"B", "G", "R"};
+    double sum = 0;
+    int n      = 0;
+    std::string per;
+    for (size_t i = 0; i < d.size(); ++i) {
+        const analysis::LsbEstimate& e = rs ? d[i].rs : d[i].spa;
+        char buf[48];
+        if (e.valid) {
+            std::snprintf(buf, sizeof buf, "%s%s%s%.3f%s", per.empty() ? "" : " ", d.size() == 3 ? kNames[i] : "",
+                          d.size() == 3 ? " " : "", e.p, e.approx ? "*" : "");
+            sum += e.p;
+            ++n;
+        } else {
+            std::snprintf(buf, sizeof buf, "%s%s%sn/a", per.empty() ? "" : " ", d.size() == 3 ? kNames[i] : "",
+                          d.size() == 3 ? " " : "");
+        }
+        per += buf;
+    }
+    if (n == 0) std::printf("%-3s %-6s: n/a  [%s]\n", name, label, per.c_str());
+    else std::printf("%-3s %-6s: p=%.3f  [%s]\n", name, label, sum / n, per.c_str());
+}
+
 // ---- commands --------------------------------------------------------------------------------------
 
 int cmdKeygen(const cli::Args& a) {
@@ -389,12 +423,23 @@ int cmdEmbed(const cli::Args& a) {
                     100.0 * static_cast<double>(changed) / static_cast<double>(x.size()), maxDelta);
     }
     std::printf("written   : %s\n", out.c_str());
+
+    if (a.has("profile-out")) {
+        cli::ProfileMap pm = algo.params;
+        pm["algo"]         = algo.name;
+        pm["mode"]         = secret.password ? "password" : "kem";
+        const std::string json = cli::profileToJson(pm);
+        writeAll(a.get("profile-out"), Bytes(json.begin(), json.end()));
+        std::printf("profile   : %s (no secrets inside)\n", a.get("profile-out").c_str());
+    }
     return kOk;
 }
 
 int cmdExtract(const cli::Args& a) {
     const auto algo    = makeAlgo(a);
     const Secret secret = readSecret(a, "key", /*confirmPrompt=*/false);
+    if (const std::string pm = a.get("profile-mode"); !pm.empty() && (pm == "password") != secret.password)
+        throw cli::UsageError("the profile says mode '" + pm + "', but the secret options select the other mode");
     const auto carrier  = loadCarrier(a.require("in"), algo.audio);
 
     const auto progress = makeProgress(a.flag("progress"), "extracting");
@@ -430,6 +475,14 @@ int cmdAnalyze(const cli::Args& a) {
     printChi("chi cover ", analysis::chiSquare(cover));
     printChi("chi stego ", analysis::chiSquare(stg));
     std::printf("(chi-square is a global test: adaptive/shuffled embedding at low fill will not trigger it)\n");
+    const auto detCover = analysis::lsbDetection(cover);
+    const auto detStego = analysis::lsbDetection(stg);
+    printLsb("RS", "cover", detCover, true);
+    printLsb("RS", "stego", detStego, true);
+    printLsb("SPA", "cover", detCover, false);
+    printLsb("SPA", "stego", detStego, false);
+    std::printf("(RS/SPA: estimated fraction of ALL samples carrying a bit, 0 = clean, noise roughly +-0.03;\n"
+                " only LSB-1 replacement is modelled; '*' = no real root, double-root fallback near p=1)\n");
 
     auto save = [](const std::string& path, const cv::Mat& m) {
         if (extensionOf(path) != ".png") throw cli::UsageError("visualisation output must be .png: " + path);
@@ -445,7 +498,11 @@ int cmdAnalyze(const cli::Args& a) {
 
 int main(int argc, char** argv) {
     try {
-        const cli::Args args = cli::parseArgs(std::vector<std::string>(argv + 1, argv + argc));
+        cli::Args args = cli::parseArgs(std::vector<std::string>(argv + 1, argv + argc));
+        if (args.has("profile")) {  // capacity / extract only (see the option spec)
+            const Bytes raw = readAll(args.get("profile"));
+            cli::applyProfile(args, cli::parseProfileJson(std::string(raw.begin(), raw.end())));
+        }
         if (args.command == "help") {
             std::fputs(kUsageText, stdout);
             return kOk;
