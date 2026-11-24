@@ -28,7 +28,7 @@ QVariant CandidateTableModel::data(const QModelIndex &index, int role) const {
         case ColRank:
             return c.rank; // Returns integer for correct numeric sort
         case ColKeyHex:
-            return QString::fromLatin1(c.key.toHex().toUpper());
+            return c.keyDesc.isEmpty() ? QString::fromLatin1(c.key.toHex().toUpper()) : c.keyDesc;
         case ColKeyAscii: {
             QString ascii;
             for (char b : c.key) {

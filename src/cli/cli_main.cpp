@@ -31,13 +31,17 @@ int main(int argc, char *argv[]) {
     parser.addOption(fileOption);
 
     QCommandLineOption encodingOption(QStringList() << "e" << "encoding",
-                                      QStringLiteral("Encoding type: auto, hex, base64, raw (default: auto)."),
+                                      QStringLiteral("Encoding type: auto, hex, base64, base32, base85, url, raw (default: auto)."),
                                       QStringLiteral("type"),
                                       QStringLiteral("auto"));
     parser.addOption(encodingOption);
 
+    QCommandLineOption reverseOption(QStringList() << "r" << "reverse",
+                                     QStringLiteral("Reverse decoded byte order before decryption."));
+    parser.addOption(reverseOption);
+
     QCommandLineOption modeOption(QStringList() << "m" << "mode",
-                                  QStringLiteral("Mode: single, multi, smart, known (default: single)."),
+                                  QStringLiteral("Mode: single, multi, smart, known, addrot, bitwise, combo (default: single)."),
                                   QStringLiteral("mode"),
                                   QStringLiteral("single"));
     parser.addOption(modeOption);
@@ -89,6 +93,9 @@ int main(int argc, char *argv[]) {
     EncodingType encType = EncodingType::Auto;
     if (encStr == "hex") encType = EncodingType::Hex;
     else if (encStr == "base64" || encStr == "b64") encType = EncodingType::Base64;
+    else if (encStr == "base32" || encStr == "b32") encType = EncodingType::Base32;
+    else if (encStr == "base85" || encStr == "b85" || encStr == "ascii85") encType = EncodingType::Base85;
+    else if (encStr == "url") encType = EncodingType::Url;
     else if (encStr == "raw") encType = EncodingType::Raw;
 
     if (encType == EncodingType::Auto) {
@@ -96,7 +103,8 @@ int main(int argc, char *argv[]) {
         std::cout << "[*] Auto-detected encoding: " << EncodingUtils::encodingName(encType).toStdString() << "\n";
     }
 
-    QByteArray ciphertext = EncodingUtils::decodeInput(inputText, encType, rawData);
+    bool reverse = parser.isSet(reverseOption);
+    QByteArray ciphertext = EncodingUtils::decodeInput(inputText, encType, rawData, reverse);
     if (ciphertext.isEmpty()) {
         std::cerr << "Error: Decoded ciphertext is empty.\n";
         return 1;
@@ -157,6 +165,12 @@ int main(int argc, char *argv[]) {
         QByteArray crib = parser.value(cribOption).toUtf8();
         int keyLen = parser.value(keyLenOption).toInt();
         engine.runKnownPlaintext(ciphertext, crib, keyLen, true, topN);
+    } else if (mode == "addrot" || mode == "add" || mode == "rot") {
+        engine.runAddSubRot(ciphertext, topN);
+    } else if (mode == "bitwise" || mode == "rol" || mode == "ror") {
+        engine.runBitwiseShiftNot(ciphertext, topN);
+    } else if (mode == "combo") {
+        engine.runComboXorAddRol(ciphertext, true, true, topN);
     } else {
         std::cerr << "Error: Unknown mode: " << mode.toStdString() << "\n";
         return 1;
@@ -174,17 +188,18 @@ int main(int argc, char *argv[]) {
     // Print table
     std::cout << "\n"
               << std::left << std::setw(6)  << "Rank"
-              << std::left << std::setw(16) << "Key (Hex)"
+              << std::left << std::setw(22) << "Key / Op"
               << std::left << std::setw(10) << "Score"
               << std::left << std::setw(8)  << "Flag"
               << "Preview\n";
-    std::cout << std::string(75, '-') << "\n";
+    std::cout << std::string(80, '-') << "\n";
 
     int count = std::min(topN, static_cast<int>(finalResults.size()));
     for (int i = 0; i < count; ++i) {
         const auto &cand = finalResults[i];
+        QString keyStr = cand.keyDesc.isEmpty() ? QString::fromLatin1(cand.key.toHex().toUpper()) : cand.keyDesc;
         std::cout << std::left << std::setw(6)  << cand.rank
-                  << std::left << std::setw(16) << cand.key.toHex().toUpper().toStdString()
+                  << std::left << std::setw(22) << keyStr.toStdString()
                   << std::left << std::setw(10) << std::fixed << std::setprecision(1) << cand.score
                   << std::left << std::setw(8)  << (cand.containsFlag ? "[YES]" : "")
                   << cand.preview.toStdString() << "\n";

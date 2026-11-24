@@ -48,6 +48,7 @@ target_link_libraries(xorbrute_cli PRIVATE
 # --------------------------------------------------------------------------
 if(Qt6Widgets_FOUND)
     set(GUI_SOURCES
+        resources.qrc
         src/app/main.cpp
         src/gui/MainWindow.h
         src/gui/MainWindow.cpp

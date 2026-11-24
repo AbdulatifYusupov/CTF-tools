@@ -50,6 +50,21 @@ public slots:
     void runKnownPlaintext(const QByteArray &ciphertext, const QByteArray &crib, int assumedKeyLen = 0, bool cribDrag = true, int topN = 200);
 
     /**
+     * @brief Byte-wise ADD/SUB ((b - k) & 0xFF) and Caesar ROT-N / ROT-47 brute force.
+     */
+    void runAddSubRot(const QByteArray &ciphertext, int topN = 200);
+
+    /**
+     * @brief Bitwise NOT, ROL/ROR (1..7 bits), and combinations with single-byte XOR.
+     */
+    void runBitwiseShiftNot(const QByteArray &ciphertext, int topN = 200);
+
+    /**
+     * @brief Combo mode: Single-byte XOR combined with ADD/SUB (65,536x2) and/or ROL/ROR.
+     */
+    void runComboXorAddRol(const QByteArray &ciphertext, bool includeXorAdd = true, bool includeXorRol = true, int topN = 200);
+
+    /**
      * @brief Request graceful cancellation of ongoing brute-force.
      */
     void cancel();
@@ -62,7 +77,8 @@ signals:
 
 private:
     Candidate materializeCandidate(uint32_t keyInt, uint8_t keyLen, const QByteArray &ciphertext) const;
-    Candidate materializeCandidateFromBytes(const QByteArray &key, const QByteArray &ciphertext) const;
+    Candidate materializeCandidateFromBytes(const QByteArray &key, const QByteArray &ciphertext, const QString &keyDesc = QString()) const;
+    Candidate materializeTransformCandidate(const FastCandidate &fc, const QByteArray &ciphertext) const;
 
     Scorer m_scorer;
     QAtomicInt m_cancelRequested{0};

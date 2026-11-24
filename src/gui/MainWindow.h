@@ -61,6 +61,7 @@ private:
     // UI Widgets
     DropAreaTextEdit *m_inputEdit = nullptr;
     QComboBox *m_encodingCombo = nullptr;
+    QCheckBox *m_reverseBytesCheck = nullptr;
     QLabel *m_inputInfoLabel = nullptr;
 
     QTabWidget *m_modeTabs = nullptr;
@@ -70,6 +71,8 @@ private:
     QLineEdit *m_cribEdit = nullptr;
     QCheckBox *m_cribDragCheck = nullptr;
     QSpinBox *m_knownKeyLenSpin = nullptr;
+    QCheckBox *m_comboXorAddCheck = nullptr;
+    QCheckBox *m_comboXorRolCheck = nullptr;
     QSpinBox *m_topNSpin = nullptr;
 
     QPushButton *m_startBtn = nullptr;

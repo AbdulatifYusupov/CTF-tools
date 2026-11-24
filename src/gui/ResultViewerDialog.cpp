@@ -26,8 +26,11 @@ ResultViewerDialog::ResultViewerDialog(const Candidate &candidate, QWidget *pare
     // Header Info Bar
     QHBoxLayout *headerLayout = new QHBoxLayout();
     QLabel *rankLabel = new QLabel(tr("<b>Rank:</b> #%1").arg(candidate.rank), this);
-    QLabel *keyLabel = new QLabel(tr("<b>Key (Hex):</b> <code>%1</code> (len %2)")
-                                      .arg(QString::fromLatin1(candidate.key.toHex().toUpper()))
+    QString keyDisplay = candidate.keyDesc.isEmpty()
+        ? QString::fromLatin1(candidate.key.toHex().toUpper())
+        : candidate.keyDesc;
+    QLabel *keyLabel = new QLabel(tr("<b>Key / Op:</b> <code>%1</code> (len %2)")
+                                      .arg(keyDisplay.toHtmlEscaped())
                                       .arg(candidate.key.size()), this);
     QLabel *scoreLabel = new QLabel(tr("<b>Score:</b> %1").arg(QString::number(candidate.score, 'f', 1)), this);
 

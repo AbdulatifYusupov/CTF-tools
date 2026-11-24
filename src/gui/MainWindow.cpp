@@ -158,7 +158,13 @@ void MainWindow::setupUi() {
     m_encodingCombo->addItem(tr("Auto-detect"), static_cast<int>(EncodingType::Auto));
     m_encodingCombo->addItem(tr("Base64"), static_cast<int>(EncodingType::Base64));
     m_encodingCombo->addItem(tr("Hex"), static_cast<int>(EncodingType::Hex));
+    m_encodingCombo->addItem(tr("Base32"), static_cast<int>(EncodingType::Base32));
+    m_encodingCombo->addItem(tr("Base85 / ASCII85"), static_cast<int>(EncodingType::Base85));
+    m_encodingCombo->addItem(tr("URL-decode"), static_cast<int>(EncodingType::Url));
     m_encodingCombo->addItem(tr("Raw Bytes"), static_cast<int>(EncodingType::Raw));
+
+    m_reverseBytesCheck = new QCheckBox(tr("Reverse bytes"), inputGroup);
+    m_reverseBytesCheck->setToolTip(tr("Reverse byte order after decoding input"));
 
     m_inputInfoLabel = new QLabel(inputGroup);
 
@@ -169,6 +175,7 @@ void MainWindow::setupUi() {
     inputToolLayout->addWidget(detectBtn);
     inputToolLayout->addWidget(encLabel);
     inputToolLayout->addWidget(m_encodingCombo);
+    inputToolLayout->addWidget(m_reverseBytesCheck);
     inputToolLayout->addSpacing(15);
     inputToolLayout->addWidget(m_inputInfoLabel);
     inputToolLayout->addStretch();
@@ -253,6 +260,37 @@ void MainWindow::setupUi() {
     knownRow->addWidget(m_knownKeyLenSpin);
     knownLayout->addLayout(knownRow);
     m_modeTabs->addTab(knownTab, tr("Known-Plaintext (Crib Dragging)"));
+
+    // Tab 5: ADD/SUB & ROT-N
+    QWidget *addRotTab = new QWidget(m_modeTabs);
+    QVBoxLayout *addRotLayout = new QVBoxLayout(addRotTab);
+    QLabel *addRotInfo = new QLabel(tr("Tests all 256 byte-wise ADD/SUB shifts ((b - k) & 0xFF), Caesar ROT-1..25 on letters, and ROT-47 on printable ASCII."), addRotTab);
+    addRotLayout->addWidget(addRotInfo);
+    m_modeTabs->addTab(addRotTab, tr("ADD/SUB & ROT-N"));
+
+    // Tab 6: Bitwise Shifts + NOT
+    QWidget *bitwiseTab = new QWidget(m_modeTabs);
+    QVBoxLayout *bitwiseLayout = new QVBoxLayout(bitwiseTab);
+    QLabel *bitwiseInfo = new QLabel(tr("Tests bitwise NOT (~b), ROL/ROR (1-7 bits), and their combinations with single-byte XOR (e.g. ROL(b, r) ^ k, (~b) ^ k)."), bitwiseTab);
+    bitwiseLayout->addWidget(bitwiseInfo);
+    m_modeTabs->addTab(bitwiseTab, tr("Bitwise (ROL/ROR/NOT)"));
+
+    // Tab 7: Combo (XOR + ADD/ROL)
+    QWidget *comboTab = new QWidget(m_modeTabs);
+    QVBoxLayout *comboLayout = new QVBoxLayout(comboTab);
+    QHBoxLayout *comboRow = new QHBoxLayout();
+    m_comboXorAddCheck = new QCheckBox(tr("XOR + ADD/SUB (65,536 x 2 combinations)"), comboTab);
+    m_comboXorAddCheck->setChecked(true);
+    m_comboXorRolCheck = new QCheckBox(tr("XOR + ROL/ROR (1-7 bits, both orders)"), comboTab);
+    m_comboXorRolCheck->setChecked(true);
+    comboRow->addWidget(m_comboXorAddCheck);
+    comboRow->addSpacing(20);
+    comboRow->addWidget(m_comboXorRolCheck);
+    comboRow->addStretch();
+    comboLayout->addLayout(comboRow);
+    QLabel *comboInfo = new QLabel(tr("Parallelized combo brute force across both operation orders: (b ^ k1) op k2 and (b op k2) ^ k1."), comboTab);
+    comboLayout->addWidget(comboInfo);
+    m_modeTabs->addTab(comboTab, tr("Combo (XOR + ADD/ROL)"));
 
     topLayout->addWidget(m_modeTabs);
 
@@ -458,7 +496,8 @@ void MainWindow::onDetectKeyLengths() {
     }
 
     EncodingType enc = static_cast<EncodingType>(m_encodingCombo->currentData().toInt());
-    QByteArray ciphertext = EncodingUtils::decodeInput(m_inputEdit->toPlainText(), enc, raw);
+    bool rev = m_reverseBytesCheck->isChecked();
+    QByteArray ciphertext = EncodingUtils::decodeInput(m_inputEdit->toPlainText(), enc, raw, rev);
 
     if (ciphertext.size() < 8) {
         QMessageBox::warning(this, tr("Warning"), tr("Ciphertext is too short for key length estimation (need >= 8 bytes)."));
@@ -505,7 +544,8 @@ void MainWindow::onStartAttack() {
     }
 
     EncodingType enc = static_cast<EncodingType>(m_encodingCombo->currentData().toInt());
-    QByteArray ciphertext = EncodingUtils::decodeInput(m_inputEdit->toPlainText(), enc, raw);
+    bool rev = m_reverseBytesCheck->isChecked();
+    QByteArray ciphertext = EncodingUtils::decodeInput(m_inputEdit->toPlainText(), enc, raw, rev);
 
     if (ciphertext.isEmpty()) {
         QMessageBox::warning(this, tr("Warning"), tr("Decoded ciphertext is empty. Please verify encoding."));
@@ -545,6 +585,20 @@ void MainWindow::onStartAttack() {
         QMetaObject::invokeMethod(m_engine, "runKnownPlaintext", Qt::QueuedConnection,
                                   Q_ARG(QByteArray, ciphertext), Q_ARG(QByteArray, crib),
                                   Q_ARG(int, assumedLen), Q_ARG(bool, cribDrag), Q_ARG(int, topN));
+    } else if (modeIdx == 4) {
+        // ADD/SUB & ROT-N
+        QMetaObject::invokeMethod(m_engine, "runAddSubRot", Qt::QueuedConnection,
+                                  Q_ARG(QByteArray, ciphertext), Q_ARG(int, topN));
+    } else if (modeIdx == 5) {
+        // Bitwise ROL/ROR/NOT
+        QMetaObject::invokeMethod(m_engine, "runBitwiseShiftNot", Qt::QueuedConnection,
+                                  Q_ARG(QByteArray, ciphertext), Q_ARG(int, topN));
+    } else if (modeIdx == 6) {
+        // Combo XOR + ADD/ROL
+        bool doAdd = m_comboXorAddCheck->isChecked();
+        bool doRol = m_comboXorRolCheck->isChecked();
+        QMetaObject::invokeMethod(m_engine, "runComboXorAddRol", Qt::QueuedConnection,
+                                  Q_ARG(QByteArray, ciphertext), Q_ARG(bool, doAdd), Q_ARG(bool, doRol), Q_ARG(int, topN));
     }
 }
 
@@ -655,8 +709,10 @@ void MainWindow::onExportAllCsv() {
     for (const auto &c : candidates) {
         QString escapedPreview = c.preview;
         escapedPreview.replace('"', QStringLiteral("\"\""));
+        QString keyStr = c.keyDesc.isEmpty() ? QString::fromLatin1(c.key.toHex().toUpper()) : c.keyDesc;
+        keyStr.replace('"', QStringLiteral("\"\""));
         out << c.rank << ","
-            << c.key.toHex().toUpper() << ","
+            << "\"" << keyStr << "\","
             << QString::number(c.score, 'f', 1) << ","
             << (c.containsFlag ? "YES" : "NO") << ","
             << "\"" << escapedPreview << "\"\n";

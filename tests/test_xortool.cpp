@@ -16,6 +16,10 @@ private slots:
     void testKeyLengthEstimation();
     void testCribDragging();
     void testMultiByteBruteForce();
+    void testExtendedEncodings();
+    void testAddSubRot();
+    void testBitwiseShiftNot();
+    void testComboXorAddRol();
 };
 
 void TestXorTool::testEncodingDetection() {
@@ -172,6 +176,87 @@ void TestXorTool::testMultiByteBruteForce() {
     const Candidate &best = results.first();
     QCOMPARE(best.key, key);
     QCOMPARE(best.plaintext, plain);
+}
+
+void TestXorTool::testExtendedEncodings() {
+    // Base32 ("MZXW6===" -> "foo")
+    QCOMPARE(EncodingUtils::detectEncoding(QStringLiteral("MZXW6===")), EncodingType::Base32);
+    QCOMPARE(EncodingUtils::decodeInput(QStringLiteral("MZXW6==="), EncodingType::Auto), QByteArray("foo"));
+
+    // Adobe ASCII85 ("<~9jqo^~>" -> "Man ", "<~z~>" -> 4 zero bytes)
+    QCOMPARE(EncodingUtils::detectEncoding(QStringLiteral("<~9jqo^~>")), EncodingType::Base85);
+    QCOMPARE(EncodingUtils::decodeInput(QStringLiteral("<~9jqo^~>"), EncodingType::Auto), QByteArray("Man "));
+    QCOMPARE(EncodingUtils::decodeInput(QStringLiteral("<~z~>"), EncodingType::Base85), QByteArray("\x00\x00\x00\x00", 4));
+
+    // URL percent-encoding
+    QCOMPARE(EncodingUtils::detectEncoding(QStringLiteral("FLAG%7Burl_dec0d3%7D")), EncodingType::Url);
+    QCOMPARE(EncodingUtils::decodeInput(QStringLiteral("FLAG%7Burl_dec0d3%7D"), EncodingType::Auto), QByteArray("FLAG{url_dec0d3}"));
+
+    // Reverse bytes
+    QCOMPARE(EncodingUtils::decodeInput(QStringLiteral("}galf{GALF"), EncodingType::Raw, QByteArray(), true), QByteArray("FLAG{flag}"));
+}
+
+void TestXorTool::testAddSubRot() {
+    // 1. Byte ADD (+5)
+    QByteArray plainAdd = "FLAG{byte_add_sub_test}";
+    QByteArray cipherAdd;
+    for (char c : plainAdd) {
+        cipherAdd.append(static_cast<char>((static_cast<uint8_t>(c) + 5) & 0xFF));
+    }
+
+    XorEngine engine;
+    QSignalSpy spy(&engine, &XorEngine::finished);
+    engine.runAddSubRot(cipherAdd, 20);
+    QCOMPARE(spy.count(), 1);
+    QVector<Candidate> results = qvariant_cast<QVector<Candidate>>(spy.at(0).at(0));
+    QVERIFY(!results.isEmpty());
+    QCOMPARE(results.first().plaintext, plainAdd);
+
+    // 2. Caesar ROT-13
+    QByteArray cipherRot = "SYNT{ebg13_grfg_synt}";
+    spy.clear();
+    engine.runAddSubRot(cipherRot, 20);
+    QCOMPARE(spy.count(), 1);
+    results = qvariant_cast<QVector<Candidate>>(spy.at(0).at(0));
+    QVERIFY(!results.isEmpty());
+    QCOMPARE(results.first().plaintext, QByteArray("FLAG{rot13_test_flag}"));
+}
+
+void TestXorTool::testBitwiseShiftNot() {
+    // Encrypt with: ((b ^ 0x42) rotated left by 3) -> decrypt is ROR(cipher, 3) ^ 0x42
+    QByteArray plain = "FLAG{bitwise_rol_xor_test}";
+    QByteArray cipher;
+    for (char ch : plain) {
+        uint8_t b = static_cast<uint8_t>(ch) ^ 0x42;
+        uint8_t enc = static_cast<uint8_t>((b << 3) | (b >> 5));
+        cipher.append(static_cast<char>(enc));
+    }
+
+    XorEngine engine;
+    QSignalSpy spy(&engine, &XorEngine::finished);
+    engine.runBitwiseShiftNot(cipher, 20);
+    QCOMPARE(spy.count(), 1);
+    QVector<Candidate> results = qvariant_cast<QVector<Candidate>>(spy.at(0).at(0));
+    QVERIFY(!results.isEmpty());
+    QCOMPARE(results.first().plaintext, plain);
+}
+
+void TestXorTool::testComboXorAddRol() {
+    // Encrypt with: ((b ^ 0x5A) + 0x17) & 0xFF -> decrypt is ((c - 0x17) & 0xFF) ^ 0x5A
+    QByteArray plain = "FLAG{combo_xor_add_works}";
+    QByteArray cipher;
+    for (char ch : plain) {
+        uint8_t enc = static_cast<uint8_t>(((static_cast<uint8_t>(ch) ^ 0x5A) + 0x17) & 0xFF);
+        cipher.append(static_cast<char>(enc));
+    }
+
+    XorEngine engine;
+    QSignalSpy spy(&engine, &XorEngine::finished);
+    engine.runComboXorAddRol(cipher, true, true, 200);
+    QCOMPARE(spy.count(), 1);
+    QVector<Candidate> results = qvariant_cast<QVector<Candidate>>(spy.at(0).at(0));
+    QVERIFY(!results.isEmpty());
+    QCOMPARE(results.first().plaintext, plain);
 }
 
 QTEST_MAIN(TestXorTool)

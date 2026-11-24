@@ -1,1 +1,7 @@
 build/
+.qtcreator/
+*.user
+*.autosave
+CMakeUserPresets.json
+.DS_Store
+Thumbs.db
