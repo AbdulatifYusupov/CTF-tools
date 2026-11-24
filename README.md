@@ -1,7 +1,7 @@
 # xorbrute: XOR Cipher & CTF Cryptanalysis Tool
 
 <p align="center">
-  <img src="IconOnly_Transparent.png" alt="xorbrute logo" width="110" />
+  <img src="FullLogo_Transparent.png" alt="xorbrute logo" width="360" />
 </p>
 
 A high-performance, cross-platform desktop application and CLI tool developed in **C++17** and **Qt 6** designed for cryptanalysis, frequency analysis, and brute-forcing of XOR and classic byte-level ciphers in CTF (Capture The Flag) competitions.
@@ -139,6 +139,7 @@ XOR_Brute_tool/
 ├── CMakeLists.txt                # Root build configuration
 ├── resources.qrc                 # Embedded Qt resources (logo)
 ├── IconOnly_Transparent.png      # Application icon
+├── FullLogo_Transparent.png      # Full README banner logo
 ├── README.md                     # Project documentation
 ├── src/
 │   ├── core/                     # Decoupled business logic (No GUI)
