@@ -312,8 +312,8 @@ void printLsb(const char* name, const char* label, const std::vector<analysis::L
         const analysis::LsbEstimate& e = rs ? d[i].rs : d[i].spa;
         char buf[48];
         if (e.valid) {
-            std::snprintf(buf, sizeof buf, "%s%s%s%.3f%s", per.empty() ? "" : " ", d.size() == 3 ? kNames[i] : "",
-                          d.size() == 3 ? " " : "", e.p, e.approx ? "*" : "");
+            std::snprintf(buf, sizeof buf, "%s%s%s%.3f%s%s", per.empty() ? "" : " ", d.size() == 3 ? kNames[i] : "",
+                          d.size() == 3 ? " " : "", e.p, e.approx ? "*" : "", e.lowReliability ? "!" : "");
             sum += e.p;
             ++n;
         } else {
@@ -482,7 +482,7 @@ int cmdAnalyze(const cli::Args& a) {
     printLsb("SPA", "cover", detCover, false);
     printLsb("SPA", "stego", detStego, false);
     std::printf("(RS/SPA: estimated fraction of ALL samples carrying a bit, 0 = clean, noise roughly +-0.03;\n"
-                " only LSB-1 replacement is modelled; '*' = no real root, double-root fallback near p=1)\n");
+                " only LSB-1 replacement is modelled; '*' = no real root, double-root fallback near p=1;\n '!' = many clipped (0/255) samples, value probably biased upward)\n");
 
     auto save = [](const std::string& path, const cv::Mat& m) {
         if (extensionOf(path) != ".png") throw cli::UsageError("visualisation output must be .png: " + path);

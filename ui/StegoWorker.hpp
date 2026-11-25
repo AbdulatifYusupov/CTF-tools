@@ -1,4 +1,5 @@
 #pragma once
+#include "analysis/LsbDetection.hpp"
 #include "analysis/Metrics.hpp"
 #include "stego/IStegoAlgorithm.hpp"
 
@@ -12,6 +13,7 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace app {
 
@@ -23,6 +25,8 @@ struct EmbedReport {
     analysis::ChiSquareResult chiAfter;
     size_t capacityBits = 0;  // of the cover, for this algorithm and options
     size_t usedBits     = 0;  // header + length + ciphertext + tag
+    std::vector<analysis::LsbDetection> lsbBefore;  // RS / sample pairs per colour channel
+    std::vector<analysis::LsbDetection> lsbAfter;
 };
 
 struct ExtractReport {
@@ -40,7 +44,8 @@ struct Outcome {
 // Runs embed / extract (+ metrics) on a private single-thread pool and reports back
 // through signals on the GUI thread. One operation at a time.
 //
-//   worker.embed(algo, cover, payload, pubKey);
+//   worker.embed(algo, cover, payload, pubKey);            // ML-KEM mode
+//   worker.embedWithPassword(algo, cover, payload, pw);    // password mode
 //   -> progress(0..100) ... -> embedFinished(report) | failed(msg) | cancelled()
 class StegoWorker : public QObject {
     Q_OBJECT
@@ -56,6 +61,11 @@ public:
     void embed(AlgoPtr algo, const cv::Mat& cover, QByteArray payload,
                QByteArray recipientPublicKeyDer);
     void extract(AlgoPtr algo, const cv::Mat& stegoImage, QByteArray recipientPrivateKeyDer);
+
+    // Password mode (Argon2id, 16-byte header). `passwordUtf8` is copied.
+    void embedWithPassword(AlgoPtr algo, const cv::Mat& cover, QByteArray payload,
+                           QByteArray passwordUtf8);
+    void extractWithPassword(AlgoPtr algo, const cv::Mat& stegoImage, QByteArray passwordUtf8);
 
 public slots:
     void cancel();

@@ -55,19 +55,27 @@ add_library(stego_worker STATIC ui/StegoWorker.cpp ui/StegoWorker.hpp)
 target_include_directories(stego_worker PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ui)
 target_link_libraries(stego_worker PUBLIC stego_core Qt6::Core Qt6::Concurrent)
 
-# ---- GUI --------------------------------------------------------------------
-add_executable(stego_gui
-    ui/main.cpp
-    # ui/MainWindow.cpp
-    # ui/CompareWidget.cpp
-    # ui/StegoWorker.cpp
-)
-target_link_libraries(stego_gui PRIVATE stego_worker Qt6::Widgets)
-
-# ---- CLI --------------------------------------------------------------------
+# ---- CLI argument/profile library (no Qt, no OpenCV) -------------------------
 add_library(stego_cli_args STATIC cli/Args.cpp cli/Profile.cpp)
 target_include_directories(stego_cli_args PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/cli)
 
+# ---- GUI logic without Qt widgets (settings <-> profile, algorithm factory) --
+add_library(stego_app_logic STATIC ui/AlgoSettings.cpp ui/AlgoFactory.cpp)
+target_include_directories(stego_app_logic PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/ui)
+target_link_libraries(stego_app_logic PUBLIC stego_core stego_cli_args)
+
+# ---- GUI --------------------------------------------------------------------
+add_executable(stego_gui
+    ui/main.cpp
+    ui/MainWindow.cpp
+    ui/MainWindow.hpp
+    ui/CompareWidget.cpp
+    ui/CompareWidget.hpp
+    ui/ImageConvert.hpp
+)
+target_link_libraries(stego_gui PRIVATE stego_worker stego_app_logic Qt6::Widgets)
+
+# ---- CLI --------------------------------------------------------------------
 add_executable(stego_cli cli/main.cpp)
 target_link_libraries(stego_cli PRIVATE stego_core stego_cli_args)
 
@@ -104,6 +112,10 @@ add_test(NAME steganalysis_test COMMAND steganalysis_test)
 add_executable(adaptive_lsb_roundtrip tests/adaptive_lsb_roundtrip.cpp)
 target_link_libraries(adaptive_lsb_roundtrip PRIVATE stego_core)
 add_test(NAME adaptive_lsb_roundtrip COMMAND adaptive_lsb_roundtrip)
+
+add_executable(algo_settings_test tests/algo_settings_test.cpp)
+target_link_libraries(algo_settings_test PRIVATE stego_app_logic)
+add_test(NAME algo_settings_test COMMAND algo_settings_test)
 
 add_executable(cli_args_test tests/cli_args_test.cpp)
 target_link_libraries(cli_args_test PRIVATE stego_cli_args)

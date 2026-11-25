@@ -29,7 +29,8 @@ int main(int argc, char** argv) {
     int exitCode = 1;
     int lastProgress = -1;
     bool monotone = true, sawProgress = false;
-    enum class Phase { Embed, Extract, Cancel } phase = Phase::Embed;
+    enum class Phase { Embed, Extract, PwEmbed, PwExtract, Cancel } phase = Phase::Embed;
+    const QByteArray password = "correct horse battery staple";
 
     auto fail = [&](const char* msg) {
         std::fprintf(stderr, "FAIL: %s\n", msg);
@@ -46,6 +47,14 @@ int main(int argc, char** argv) {
                      [&](const QString& m) { fail(qPrintable(m)); });
 
     QObject::connect(&worker, &app::StegoWorker::embedFinished, [&](const app::EmbedReport& r) {
+        if (phase == Phase::PwEmbed) {
+            if (r.stego.empty() || r.usedBits == 0 || r.usedBits > r.capacityBits) return fail("bad password embed report");
+            if (r.lsbBefore.size() != 3 || r.lsbAfter.size() != 3) return fail("missing LSB detection results");
+            std::printf("password embed OK: psnr=%.2f used=%zu/%zu bits\n", r.psnr, r.usedBits, r.capacityBits);
+            phase = Phase::PwExtract;
+            worker.extractWithPassword(algo, r.stego, password);
+            return;
+        }
         if (phase != Phase::Embed) return fail("unexpected embedFinished");
         if (!monotone) return fail("progress went backwards");
         if (!sawProgress) return fail("no progress reported");
@@ -60,12 +69,23 @@ int main(int argc, char** argv) {
 
     QObject::connect(&worker, &app::StegoWorker::extractFinished,
                      [&](const app::ExtractReport& r) {
-        if (phase != Phase::Extract) return fail("unexpected extractFinished");
-        if (r.payload != payload) return fail("payload mismatch");
-        std::puts("extract OK");
-        phase = Phase::Cancel;
-        worker.embed(algo, cover, payload, pub);
-        worker.cancel();  // must end in cancelled(), never in embedFinished/failed
+        if (phase != Phase::Extract && phase != Phase::PwExtract) return fail("unexpected extractFinished");
+        if (phase == Phase::Extract && r.payload != payload) return fail("payload mismatch");
+        if (phase == Phase::Extract) {
+            std::puts("extract OK");
+            phase = Phase::PwEmbed;
+            worker.embedWithPassword(algo, cover, payload, password);
+            return;
+        }
+        if (phase == Phase::PwExtract) {
+            if (r.payload != payload) return fail("password payload mismatch");
+            std::puts("password extract OK");
+            phase = Phase::Cancel;
+            worker.embed(algo, cover, payload, pub);
+            worker.cancel();  // must end in cancelled(), never in embedFinished/failed
+            return;
+        }
+        fail("unexpected extractFinished");
     });
 
     QObject::connect(&worker, &app::StegoWorker::cancelled, [&] {

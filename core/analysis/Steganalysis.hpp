@@ -9,7 +9,8 @@
 //
 // Both return the estimated relative message length p (fraction of samples that carry a bit;
 // 0 = clean, 1 = every LSB replaced). The value is RAW: it can be slightly negative or above 1
-// from estimation noise. Both are known to be unreliable on flat / synthetic / heavily
+// from estimation noise. Samples at the extreme values (0/1 and 254/255 for 8-bit) are ignored
+// because clipping breaks the model and makes clean noisy images read as embedded. Both are known to be unreliable on flat / synthetic / heavily
 // processed covers and on previously JPEG-compressed images.
 #include <cstddef>
 #include <cstdint>
@@ -35,6 +36,8 @@ struct LsbEstimate {
     bool approx   = false;  // valid, but the quadratic had no real root and the double-root fallback was
                             // used. Happens by noise when p is close to 1 (the two roots merge there).
     size_t units  = 0;      // groups (RS) or pairs (SPA) that were used
+    bool lowReliability = false;  // many samples were clipped (see skipped): the value can be biased upward
+    size_t skipped = 0;     // groups/pairs left out because they touch the first/last 2-value block (clipping)
 };
 
 // Throw std::invalid_argument if the span does not cover the described plane.

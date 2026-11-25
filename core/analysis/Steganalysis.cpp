@@ -18,6 +18,18 @@ template <> struct Traits<int16_t> {
     static int toU(int16_t v) { return static_cast<int>(v) + 32768; }  // LSB is preserved
 };
 
+// Samples in the first and last 2-value block (0/1 and 254/255, or 0/1 and 65534/65535) are left
+// out. Clipping piles samples up on these values, which breaks the parity symmetry both estimators
+// rely on; on noisy covers even ~1% of clipped pixels produced estimates of 0.3..0.8 on CLEAN images
+// (measured). Membership of a block is unchanged by LSB replacement, so dropping the whole block
+// keeps the estimators' model intact. This does NOT remove the bias completely (clean synthetic
+// covers with 3% / 9% / 19% of samples clipped still read +0.1 / +0.2 / +0.3), and excluding wider
+// margins made it worse, so heavily clipped input is flagged via LsbEstimate::lowReliability.
+template <class T>
+inline bool atEdge(int u) {
+    return (u >> 1) == 0 || (u >> 1) == (Traits<T>::kMax >> 1);
+}
+
 template <class T>
 const T* rowPtr(const Plane<T>& p, size_t y) {
     const size_t rs = p.rowStride ? p.rowStride : p.width * p.step;
@@ -60,6 +72,12 @@ Root smallRoot(double a, double b, double c, double& x) {
 // the cover violates the model (flat, synthetic, saturated, ...) and is reported as invalid.
 constexpr double kFallbackMinP = 0.7;
 
+// Share of units dropped because of clipping above which the estimate is flagged. Thresholds are
+// from the synthetic clipping sweep: pairs drop about 2x and groups about 4x the clipped sample
+// share, and a bias above the estimator's own noise (~0.05) appeared around 3% clipped samples.
+constexpr double kPairSkipLimit  = 0.05;
+constexpr double kGroupSkipLimit = 0.10;
+
 // ---- RS ----------------------------------------------------------------------------------------
 
 struct RsCounts {
@@ -78,17 +96,24 @@ inline int disc(const int (&g)[4]) {
 }
 
 template <class T>
-RsCounts rsCounts(const Plane<T>& p, bool flipAll, size_t& groups) {
+RsCounts rsCounts(const Plane<T>& p, bool flipAll, size_t& groups, size_t& skipped) {
     constexpr int kMax = Traits<T>::kMax;
     RsCounts c;
-    groups = 0;
+    groups  = 0;
+    skipped = 0;
     for (size_t y = 0; y < p.height; ++y) {
         const T* row = rowPtr(p, y);
         for (size_t x = 0; x + 4 <= p.width; x += 4) {
             int g[4];
+            bool edge = false;
             for (int i = 0; i < 4; ++i) {
                 g[i] = Traits<T>::toU(row[(x + static_cast<size_t>(i)) * p.step]);
+                edge = edge || atEdge<T>(g[i]);
                 if (flipAll) g[i] ^= 1;
+            }
+            if (edge) {
+                ++skipped;
+                continue;
             }
             const int f0 = disc(g);
             int gm[4] = {g[0], f1(g[1]), f1(g[2]), g[3]};
@@ -105,11 +130,13 @@ RsCounts rsCounts(const Plane<T>& p, bool flipAll, size_t& groups) {
 template <class T>
 LsbEstimate rsImpl(const Plane<T>& p) {
     validate(p);
-    size_t n0 = 0, n1 = 0;
-    const RsCounts a = rsCounts(p, false, n0);
-    const RsCounts b = rsCounts(p, true, n1);
+    size_t n0 = 0, n1 = 0, sk0 = 0, sk1 = 0;
+    const RsCounts a = rsCounts(p, false, n0, sk0);
+    const RsCounts b = rsCounts(p, true, n1, sk1);
     LsbEstimate r;
-    r.units = n0;
+    r.units   = n0;
+    r.skipped = sk0;
+    r.lowReliability = static_cast<double>(sk0) > kGroupSkipLimit * static_cast<double>(n0 + sk0);
     if (n0 < 100) return r;
     const double n   = static_cast<double>(n0);
     const double d0  = (a.rM - a.sM) / n, dm0 = (a.rMinus - a.sMinus) / n;
@@ -133,11 +160,16 @@ template <class T>
 LsbEstimate spaImpl(const Plane<T>& p) {
     validate(p);
     double P = 0, X = 0, Y = 0, K = 0;
+    size_t skipped = 0;
     for (size_t y = 0; y < p.height; ++y) {
         const T* row = rowPtr(p, y);
         for (size_t x = 0; x + 1 < p.width; ++x) {
             const int u = Traits<T>::toU(row[x * p.step]);
             const int v = Traits<T>::toU(row[(x + 1) * p.step]);
+            if (atEdge<T>(u) || atEdge<T>(v)) {
+                ++skipped;
+                continue;
+            }
             ++P;
             if ((u >> 1) == (v >> 1)) ++K;  // same 2-block: invariant under LSB replacement
             const bool vEven = (v & 1) == 0;
@@ -148,7 +180,9 @@ LsbEstimate spaImpl(const Plane<T>& p) {
         }
     }
     LsbEstimate r;
-    r.units = static_cast<size_t>(P);
+    r.units   = static_cast<size_t>(P);
+    r.skipped = skipped;
+    r.lowReliability = static_cast<double>(skipped) > kPairSkipLimit * (P + static_cast<double>(skipped));
     if (P < 100) return r;
     // (K/2) p^2 + (2X - P) p + (Y - X) = 0, smaller root
     double x = 0;

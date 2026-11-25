@@ -7,6 +7,7 @@
 #include <QtConcurrent>
 
 #include <span>
+#include <string_view>
 
 namespace app {
 namespace {
@@ -14,6 +15,12 @@ namespace {
 using EmbedOutcome   = detail::Outcome<EmbedReport>;
 using ExtractOutcome = detail::Outcome<ExtractReport>;
 using AlgoPtr        = StegoWorker::AlgoPtr;
+
+// Which envelope to use and its secret: recipient public/private key (DER) or the password (UTF-8).
+struct Envelope {
+    bool password = false;
+    QByteArray secret;
+};
 
 std::span<const uint8_t> bytesOf(const QByteArray& b) {
     return {reinterpret_cast<const uint8_t*>(b.constData()), static_cast<size_t>(b.size())};
@@ -27,15 +34,16 @@ void throwIfCanceled(QPromise<T>& p) {
 // Runs on the pool thread. Never lets an exception escape: errors travel in the Outcome,
 // cancellation is signalled by the future's canceled flag (no value, no error).
 void runEmbed(QPromise<EmbedOutcome>& promise, AlgoPtr algo, cv::Mat cover, QByteArray payload,
-              QByteArray pubKey) {
+              Envelope env) {
     promise.setProgressRange(0, 100);
     EmbedOutcome out;
     try {
         EmbedReport rep;
         stego::Carrier carrier = cover.clone();  // embed() works in place
 
-        rep.capacityBits = algo->capacityBits(carrier, stego::kKemHeaderBytes);
-        rep.usedBits = (stego::kKemHeaderBytes + crypto::kLengthFieldSize +
+        const size_t header = env.password ? stego::kPasswordHeaderBytes : stego::kKemHeaderBytes;
+        rep.capacityBits    = algo->capacityBits(carrier, header);
+        rep.usedBits = (header + crypto::kLengthFieldSize +
                         static_cast<size_t>(payload.size()) + crypto::kTagSize) * 8;
         throwIfCanceled(promise);
 
@@ -44,7 +52,12 @@ void runEmbed(QPromise<EmbedOutcome>& promise, AlgoPtr algo, cv::Mat cover, QByt
             promise.setProgressValue(static_cast<int>(f * 70.f));
             return !promise.isCanceled();
         };
-        stego::embedMessage(*algo, carrier, bytesOf(payload), bytesOf(pubKey), prog);
+        if (env.password)
+            stego::embedMessageWithPassword(
+                *algo, carrier, bytesOf(payload),
+                std::string_view(env.secret.constData(), static_cast<size_t>(env.secret.size())), prog);
+        else
+            stego::embedMessage(*algo, carrier, bytesOf(payload), bytesOf(env.secret), prog);
         rep.stego = std::get<cv::Mat>(carrier);
 
         // 70..100 %: metrics, checked for cancellation between steps (SSIM is the slow one)
@@ -58,6 +71,10 @@ void runEmbed(QPromise<EmbedOutcome>& promise, AlgoPtr algo, cv::Mat cover, QByt
         promise.setProgressValue(95);
         rep.chiBefore = analysis::chiSquare(cover);
         rep.chiAfter  = analysis::chiSquare(rep.stego);
+        throwIfCanceled(promise);
+        promise.setProgressValue(97);
+        rep.lsbBefore = analysis::lsbDetection(cover);
+        rep.lsbAfter  = analysis::lsbDetection(rep.stego);
         promise.setProgressValue(100);
 
         out.value = std::move(rep);
@@ -70,7 +87,7 @@ void runEmbed(QPromise<EmbedOutcome>& promise, AlgoPtr algo, cv::Mat cover, QByt
 }
 
 void runExtract(QPromise<ExtractOutcome>& promise, AlgoPtr algo, cv::Mat stegoImage,
-                QByteArray privKey) {
+                Envelope env) {
     promise.setProgressRange(0, 100);
     ExtractOutcome out;
     try {
@@ -79,7 +96,12 @@ void runExtract(QPromise<ExtractOutcome>& promise, AlgoPtr algo, cv::Mat stegoIm
             promise.setProgressValue(static_cast<int>(f * 100.f));
             return !promise.isCanceled();
         };
-        const auto data = stego::extractMessage(*algo, carrier, bytesOf(privKey), prog);
+        const auto data =
+            env.password
+                ? stego::extractMessageWithPassword(
+                      *algo, carrier,
+                      std::string_view(env.secret.constData(), static_cast<size_t>(env.secret.size())), prog)
+                : stego::extractMessage(*algo, carrier, bytesOf(env.secret), prog);
 
         ExtractReport rep;
         rep.payload = QByteArray(reinterpret_cast<const char*>(data.data()),
@@ -136,7 +158,17 @@ void StegoWorker::embed(AlgoPtr algo, const cv::Mat& cover, QByteArray payload,
     if (!algo || cover.empty()) return emit failed(tr("No algorithm or cover image"));
     embedWatcher_.setFuture(QtConcurrent::run(&pool_, runEmbed, std::move(algo), cover.clone(),
                                               std::move(payload),
-                                              std::move(recipientPublicKeyDer)));
+                                              Envelope{false, std::move(recipientPublicKeyDer)}));
+}
+
+void StegoWorker::embedWithPassword(AlgoPtr algo, const cv::Mat& cover, QByteArray payload,
+                                    QByteArray passwordUtf8) {
+    if (busy()) return emit failed(tr("Another operation is still running"));
+    if (!algo || cover.empty()) return emit failed(tr("No algorithm or cover image"));
+    if (passwordUtf8.isEmpty()) return emit failed(tr("Password is empty"));
+    embedWatcher_.setFuture(QtConcurrent::run(&pool_, runEmbed, std::move(algo), cover.clone(),
+                                              std::move(payload),
+                                              Envelope{true, std::move(passwordUtf8)}));
 }
 
 void StegoWorker::extract(AlgoPtr algo, const cv::Mat& stegoImage,
@@ -145,7 +177,17 @@ void StegoWorker::extract(AlgoPtr algo, const cv::Mat& stegoImage,
     if (!algo || stegoImage.empty()) return emit failed(tr("No algorithm or image"));
     extractWatcher_.setFuture(QtConcurrent::run(&pool_, runExtract, std::move(algo),
                                                 stegoImage.clone(),
-                                                std::move(recipientPrivateKeyDer)));
+                                                Envelope{false, std::move(recipientPrivateKeyDer)}));
+}
+
+void StegoWorker::extractWithPassword(AlgoPtr algo, const cv::Mat& stegoImage,
+                                      QByteArray passwordUtf8) {
+    if (busy()) return emit failed(tr("Another operation is still running"));
+    if (!algo || stegoImage.empty()) return emit failed(tr("No algorithm or image"));
+    if (passwordUtf8.isEmpty()) return emit failed(tr("Password is empty"));
+    extractWatcher_.setFuture(QtConcurrent::run(&pool_, runExtract, std::move(algo),
+                                                stegoImage.clone(),
+                                                Envelope{true, std::move(passwordUtf8)}));
 }
 
 void StegoWorker::cancel() {

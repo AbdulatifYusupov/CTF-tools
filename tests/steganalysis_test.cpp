@@ -209,6 +209,41 @@ int main() {
         CHECK(threw);
     }
 
+    // 7. Clipped noisy covers (sigma 10, offset lowers the mean so a share of samples sits at 0).
+    //    Measured on 12 seeds BEFORE the edge-block exclusion: 0.9% clipped read +0.13/+0.28 (RS/SPA)
+    //    on CLEAN images, 3.4% read +0.55/+0.80. After it: +0.04/+0.04 and +0.09/+0.11, plus the
+    //    lowReliability flag for the heavy case.
+    {
+        auto clipped = [](double offset, uint32_t seed) {
+            Rng r(seed);
+            std::vector<uint8_t> img(static_cast<size_t>(427) * 718);
+            for (int y = 0; y < 718; ++y)
+                for (int x = 0; x < 427; ++x) {
+                    const double v = offset + 12 * std::sin(0.02 * x + 0.013 * y) + 10.0 * r.normal();
+                    img[static_cast<size_t>(y) * 427 + x] = static_cast<uint8_t>(std::lround(std::clamp(v, 0.0, 255.0)));
+                }
+            return img;
+        };
+        double worstLight = 0;
+        for (uint32_t s = 0; s < 6; ++s) {
+            const auto light = clipped(30.0, 500 + s);  // ~1% clipped
+            const Plane8 pl{light, 427, 718, 1, 0};
+            const auto a = rsAnalysis(pl);
+            const auto b = samplePairs(pl);
+            CHECK(a.valid && b.valid);
+            CHECK(a.skipped > 0 && b.skipped > 0);
+            CHECK(!a.lowReliability && !b.lowReliability);
+            worstLight = std::max({worstLight, std::fabs(a.p), std::fabs(b.p)});
+
+            const auto heavy = clipped(24.0, 600 + s);  // ~3.4% clipped
+            const Plane8 ph{heavy, 427, 718, 1, 0};
+            CHECK(rsAnalysis(ph).lowReliability && samplePairs(ph).lowReliability);
+            CHECK(samplePairs(ph).p < 0.3);  // was 0.80 without the exclusion
+        }
+        std::printf("clipped clean covers (~1%%): worst |p| %.4f\n", worstLight);
+        CHECK(worstLight < 0.2);
+    }
+
     std::puts("steganalysis_test: OK");
     return 0;
 }
