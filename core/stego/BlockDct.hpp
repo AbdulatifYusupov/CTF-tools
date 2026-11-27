@@ -33,6 +33,10 @@ namespace stego {
 // so little is needed. Measured on synthetic images (smooth to sigma 15, flat saturated patches,
 // two-phase embedding, 3 pairs): zero raw bit errors from strength 6 up. Distortion grows quickly
 // with it: at ~70% fill, strength 12 / 16 / 24 gave PSNR 44 / 42 / 38 dB and SSIM 0.97 / 0.96 / 0.92.
+// Real photos (12 images, password mode, up to 90% of capacity): every extraction was exact at
+// strength 8 and 12; 8 gave +2.2 dB median PSNR (+1.6 dB worst case) and ~+0.016 SSIM over 12, hence
+// the default of 8. Values below 8 are allowed (4..) but are NOT validated on photos yet; whether
+// Reed-Solomon had to correct anything is not visible in those runs.
 // Raise it only for extra margin against small later pixel changes (not tested; it does not make
 // the payload survive JPEG).
 //
@@ -44,7 +48,7 @@ class BlockDct final : public IStegoAlgorithm {
 public:
     struct Options {
         int pairsPerBlock = 2;   // 1..3 bits per block; more = more capacity, more distortion
-        int strength      = 12;  // 8..100, encoder-only; see note below
+        int strength      = 8;   // 4..100, encoder-only; see note below
         int paritySymbols = 32;  // RS parity per block, corrects paritySymbols/2 bytes
     };
 

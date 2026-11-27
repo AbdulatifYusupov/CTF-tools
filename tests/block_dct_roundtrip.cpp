@@ -40,7 +40,7 @@ int main() {
 
     const cv::Mat cover = makeImage(1024, 768);
     stego::Carrier carrier = cover.clone();
-    const stego::BlockDct algo;  // defaults: pairs=2, strength=12, parity=32
+    const stego::BlockDct algo;  // defaults: pairs=2, strength=8, parity=32
 
     CHECK(algo.capacityBits(carrier, stego::kKemHeaderBytes) >=
           (stego::kKemHeaderBytes + 4 + 16 + payload.size()) * 8);
@@ -51,7 +51,8 @@ int main() {
     const double ssim = analysis::ssim(cover, res);
     std::printf("PSNR %.2f dB, SSIM %.4f\n", psnr, ssim);
     // Guard bands, not targets. Measured with an independent SSIM implementation on this image
-    // (~70% fill, ~1/3 flat saturated patches): PSNR 44.3 dB, SSIM 0.973 at the default strength.
+    // (~70% fill, ~1/3 flat saturated patches): PSNR 44.3 dB, SSIM 0.973 at strength 12. The default is
+    // now 8 (chosen from real-photo runs); on this image it is expected to be no worse, not re-measured.
     // Flat patches are the weak spot (SSIM there ~0.95), noisy texture is much better.
     // strength 24 would give PSNR 38.2 / SSIM 0.915 on the same image.
     CHECK(psnr > 40.0 && ssim > 0.95);

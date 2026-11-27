@@ -15,7 +15,7 @@ struct AlgoSettings {
     int threshold    = 32;              // adaptive-lsb
     int pairs        = 2;               // block-dct
     int parity       = 32;              // block-dct
-    int strength     = 12;              // block-dct, encoder only: NOT part of the profile
+    int strength     = 8;               // block-dct, encoder only: NOT part of the profile
     Mode mode        = Mode::Password;
 };
 

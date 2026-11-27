@@ -220,7 +220,7 @@ void report(const Progress& progress, size_t groupIdx, size_t done, size_t total
 
 BlockDct::BlockDct(Options opt) : opt_(opt), rs_(opt.paritySymbols) {
     if (opt_.pairsPerBlock < 1 || opt_.pairsPerBlock > 3) throw std::invalid_argument("pairsPerBlock must be 1..3");
-    if (opt_.strength < 8 || opt_.strength > 100) throw std::invalid_argument("strength must be 8..100");
+    if (opt_.strength < 4 || opt_.strength > 100) throw std::invalid_argument("strength must be 4..100");
     if (opt_.paritySymbols < 2 || opt_.paritySymbols > 100) throw std::invalid_argument("paritySymbols must be 2..100");
 }
 

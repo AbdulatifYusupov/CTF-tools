@@ -23,7 +23,7 @@ std::string validate(const AlgoSettings& s) {
         if (s.threshold < 0) return "threshold must be >= 0";
     } else if (s.algo == "block-dct") {
         if (s.pairs < 1 || s.pairs > 3) return "pairs per block must be 1..3";
-        if (s.strength < 8 || s.strength > 100) return "strength must be 8..100";
+        if (s.strength < 4 || s.strength > 100) return "strength must be 4..100";
         if (s.parity < 2 || s.parity > 100) return "parity symbols must be 2..100";
     } else {
         return "unknown algorithm: " + s.algo;

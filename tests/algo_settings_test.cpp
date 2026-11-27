@@ -29,7 +29,9 @@ int main() {
     { AlgoSettings s; s.bits = 3; CHECK(!validate(s).empty()); }
     { AlgoSettings s; s.threshold = -1; CHECK(!validate(s).empty()); }
     { AlgoSettings s; s.algo = "block-dct"; s.pairs = 4; CHECK(!validate(s).empty()); }
-    { AlgoSettings s; s.algo = "block-dct"; s.strength = 7; CHECK(!validate(s).empty()); }
+    { AlgoSettings s; s.algo = "block-dct"; s.strength = 3; CHECK(!validate(s).empty()); }
+    { AlgoSettings s; s.algo = "block-dct"; s.strength = 4; CHECK(validate(s).empty()); }
+    { AlgoSettings s; s.algo = "block-dct"; CHECK(s.strength == 8); }  // measured default
     { AlgoSettings s; s.algo = "block-dct"; s.parity = 1; CHECK(!validate(s).empty()); }
     { AlgoSettings s; s.algo = "audio-lsb"; CHECK(!validate(s).empty()); }
     // bits is irrelevant for block-dct, so a bad value there must not matter
